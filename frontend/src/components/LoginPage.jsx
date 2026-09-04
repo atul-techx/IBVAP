@@ -78,7 +78,7 @@ export default function LoginPage() {
           <div className="login-title-group">
             <div className="login-badge">
               <Fingerprint size={11} />
-              <span>SIH 2026 // RESTRICTED ACCESS</span>
+              <span>DEFENSE SURVEILLANCE // RESTRICTED ACCESS</span>
             </div>
             <h1 className="login-title">
               IBVAP <span className="highlight-cyan">CORE</span>

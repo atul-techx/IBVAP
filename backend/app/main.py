@@ -215,13 +215,118 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 register_event_listener(ws_manager.trigger_in_process_broadcast)
 
+# Active background analytics stream processes: camera_id -> subprocess.Popen
+ACTIVE_STREAM_PROCESSES: dict[str, subprocess.Popen] = {}
+STREAM_PROCESSES_LOCK = threading.Lock()
+
+
+def launch_analytics_stream(
+    camera_id: str = "CAM_01",
+    source_type: str = "test_video",
+    source: str = "sample.mp4",
+    imgsz: int = 480,
+):
+    """Launch or restart background analytics process for a camera with seamless loop support."""
+    app_dir = Path(__file__).resolve().parent
+    script_path = app_dir / "detection_tracking.py"
+    test_videos_dir = app_dir.parent / "test_videos"
+
+    with STREAM_PROCESSES_LOCK:
+        existing = ACTIVE_STREAM_PROCESSES.get(camera_id)
+        if existing and existing.poll() is None:
+            try:
+                existing.terminate()
+                existing.wait(timeout=2.0)
+            except Exception:
+                try:
+                    existing.kill()
+                except Exception:
+                    pass
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--camera-id", camera_id,
+            "--imgsz", str(imgsz),
+            "--no-display",
+        ]
+
+        if source_type == "webcam" or source == "0":
+            cmd.extend(["--input", "0"])
+        else:
+            video_file = None
+            if source:
+                candidate = test_videos_dir / source
+                if candidate.exists():
+                    video_file = candidate
+                elif Path(source).exists():
+                    video_file = Path(source)
+            if not video_file:
+                for candidate_name in ["sample.mp4", "tracking_test.mp4", "real_footage_1.mp4"]:
+                    c = test_videos_dir / candidate_name
+                    if c.exists():
+                        video_file = c
+                        break
+            if video_file:
+                cmd.extend(["--input", str(video_file), "--loop"])
+            else:
+                cmd.extend(["--input", "0"])
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        )
+        ACTIVE_STREAM_PROCESSES[camera_id] = proc
+        return proc
+
+
+DEFAULT_CAMERA_FEEDS = {
+    "CAM_01": "sample.mp4",
+    "CAM_02": "suspicious_behavior_test.mp4",
+    "CAM_03": "real_footage_1.mp4",
+    "CAM_04": "tracking_test.mp4",
+}
+
+MANUALLY_STOPPED_CAMERAS: set[str] = set()
+
+
+def ensure_default_stream_running(camera_id: str = "CAM_01"):
+    """Ensure that a persistent surveillance loop is actively feeding the camera."""
+    if camera_id in MANUALLY_STOPPED_CAMERAS:
+        return None
+    with STREAM_PROCESSES_LOCK:
+        proc = ACTIVE_STREAM_PROCESSES.get(camera_id)
+        if proc and proc.poll() is None:
+            return proc
+    default_source = DEFAULT_CAMERA_FEEDS.get(camera_id, "sample.mp4")
+    return launch_analytics_stream(camera_id=camera_id, source_type="test_video", source=default_source, imgsz=480)
+
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup and launch keepalive heartbeat task."""
+    """Initialize database on startup, launch keepalive heartbeat task, and auto-start surveillance loop."""
     init_db()
     asyncio.create_task(ws_manager.start_heartbeat())
+    try:
+        ensure_default_stream_running(camera_id="CAM_01")
+        print("[+] IBVAP Surveillance Pipeline auto-started for CAM_01 (Loop mode).")
+    except Exception as e:
+        print(f"[!] Warning: Could not auto-start camera stream: {e}")
     print("[+] IBVAP FastAPI Server initialized with WebSocket heartbeat.")
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Cleanly terminate any active video inference background processes on shutdown."""
+    with STREAM_PROCESSES_LOCK:
+        for cam_id, proc in list(ACTIVE_STREAM_PROCESSES.items()):
+            if proc and proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
 
 
 # =====================================================================
@@ -573,6 +678,10 @@ def get_snapshot_image(event_id: str):
         path=str(snapshot_path),
         media_type="image/jpeg",
         filename=f"{event_id}.jpg",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+        },
     )
 
 
@@ -736,7 +845,7 @@ def generate_placeholder_frame(camera_id: str = "CAM_01", message: str = "STANDB
         2,
         cv2.LINE_AA,
     )
-    sub_msg = "Start detection_tracking.py or click 'Trigger Video Ingestion Test'"
+    sub_msg = "Click 'Resume Feed' or 'Webcam' above to activate surveillance"
     (stw, _), _ = cv2.getTextSize(sub_msg, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)
     cv2.putText(
         img,
@@ -753,11 +862,18 @@ def generate_placeholder_frame(camera_id: str = "CAM_01", message: str = "STANDB
     return encoded.tobytes()
 
 
-async def mjpeg_frame_generator(camera_id: str):
+async def mjpeg_frame_generator(camera_id: str, request: Optional[Request] = None):
     """Continuously yield multipart MJPEG frames from in-memory FrameHub or disk with zero judder."""
     backend_dir = Path(__file__).resolve().parent.parent
     live_frame_path = backend_dir / f"live_frame_{camera_id}.jpg"
     placeholder_bytes = generate_placeholder_frame(camera_id, "STANDBY // NO SIGNAL")
+
+    # Auto-ensure live surveillance loop is active only if NOT manually stopped by operator
+    try:
+        if camera_id not in MANUALLY_STOPPED_CAMERAS:
+            ensure_default_stream_running(camera_id)
+    except Exception:
+        pass
 
     hub = get_frame_hub()
     last_mtime = 0.0
@@ -765,6 +881,21 @@ async def mjpeg_frame_generator(camera_id: str):
     is_standby = False
 
     while True:
+        if request is not None and await request.is_disconnected():
+            break
+
+        if camera_id in MANUALLY_STOPPED_CAMERAS:
+            if not is_standby or (time.time() - last_yield_time > 1.0):
+                stale_bytes = generate_placeholder_frame(camera_id, "CAMERA STOPPED // STANDBY")
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + stale_bytes + b"\r\n"
+                )
+                last_yield_time = time.time()
+                is_standby = True
+            await asyncio.sleep(0.4)
+            continue
+
         try:
             # 1. First priority: In-Memory FrameHub (Zero Disk Latency)
             if hub is not None:
@@ -833,13 +964,13 @@ async def mjpeg_frame_generator(camera_id: str):
 
 
 @app.get("/api/live-feed/{camera_id}")
-async def get_live_feed(camera_id: str = "CAM_01"):
+async def get_live_feed(camera_id: str = "CAM_01", request: Request = None):
     """
     Stream real-time MJPEG video feed for standard browser <img> tags.
     Continuously streams annotated detection and tracking frames from the analytics pipeline.
     """
     return StreamingResponse(
-        mjpeg_frame_generator(camera_id),
+        mjpeg_frame_generator(camera_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
@@ -915,9 +1046,7 @@ def get_stats(current_user: dict = Depends(get_current_user)):
 def get_system_health():
     """Retrieve real-time hardware telemetry and stream health watchdog stats."""
     hub = get_frame_hub()
-    if hub is not None:
-        return hub.get_system_health()
-    return {
+    health = hub.get_system_health() if hub is not None else {
         "status": "operational",
         "uptime_seconds": 0.0,
         "cpu_percent": 0.0,
@@ -926,18 +1055,54 @@ def get_system_health():
         "aggregate_footfall": {"total_in": 0, "total_out": 0, "current_occupancy": 0},
         "camera_telemetry": {},
     }
-
-
-# Active background analytics stream processes: camera_id -> subprocess.Popen
-ACTIVE_STREAM_PROCESSES: dict[str, subprocess.Popen] = {}
-STREAM_PROCESSES_LOCK = threading.Lock()
+    backend_dir = Path(__file__).resolve().parent.parent
+    active_count = 0
+    with STREAM_PROCESSES_LOCK:
+        for cam_id, proc in list(ACTIVE_STREAM_PROCESSES.items()):
+            if proc and proc.poll() is None:
+                active_count += 1
+    for f in backend_dir.glob("live_frame_*.jpg"):
+        try:
+            if (time.time() - f.stat().st_mtime) <= 4.0:
+                active_count = max(active_count, 1)
+        except Exception:
+            pass
+    health["active_streams"] = max(health.get("active_streams", 0), active_count)
+    return health
 
 
 class StreamControlRequest(BaseModel):
     camera_id: str = "CAM_01"
-    source: str = "0"  # "0" for webcam, or path/url
-    source_type: str = "webcam"  # "webcam" | "test_video" | "rtsp"
+    source: str = "sample.mp4"  # "0" for webcam, or video filename/path/url
+    source_type: str = "test_video"  # "webcam" | "test_video" | "rtsp"
     imgsz: int = 480
+
+
+@app.get("/api/stream/videos")
+def get_available_videos():
+    """List all available surveillance video test feeds for quick switching."""
+    app_dir = Path(__file__).resolve().parent
+    test_videos_dir = app_dir.parent / "test_videos"
+    video_labels = {
+        "sample.mp4": "Sector 01 Gate (Multi-Person Intrusion & Bus Entry)",
+        "tracking_test.mp4": "Sector 04 Gate (Multi-Target Tracking & Debounce)",
+        "dark_test.mp4": "Night Low-Light Sector (Retinex-CLAHE Enhancement)",
+        "foggy_test.mp4": "Adverse Fog Weather (DCP Dehazing Verification)",
+        "suspicious_behavior_test.mp4": "Sector 02 Perimeter (Suspicious Loitering & Pacing)",
+        "real_footage_1.mp4": "Border Outpost 01 (Real Surveillance Feed)",
+        "real_footage_2.mp4": "Border Outpost 02 (Real Surveillance Feed)",
+        "real_footage_3.mp4": "Border Outpost 03 (Real Surveillance Feed)",
+    }
+    videos = []
+    for file in sorted(test_videos_dir.glob("*.mp4")):
+        if "annotated" in file.name or "output" in file.name or file.name.startswith("."):
+            continue
+        videos.append({
+            "filename": file.name,
+            "label": video_labels.get(file.name, file.stem.replace("_", " ").title()),
+            "size_kb": round(file.stat().st_size / 1024),
+        })
+    return {"videos": videos}
 
 
 @app.post("/api/stream/start")
@@ -948,46 +1113,20 @@ async def start_camera_stream(
     """
     Start live camera analytics process (Webcam #0, RTSP stream, or test video) in background with 1-click.
     """
-    app_dir = Path(__file__).resolve().parent
-    script_path = app_dir / "detection_tracking.py"
     cam_id = req.camera_id or "CAM_01"
-
-    with STREAM_PROCESSES_LOCK:
-        existing = ACTIVE_STREAM_PROCESSES.get(cam_id)
-        if existing and existing.poll() is None:
-            try:
-                existing.terminate()
-                existing.wait(timeout=2.0)
-            except Exception:
-                pass
-
-        cmd = [
-            sys.executable,
-            str(script_path),
-            "--camera-id", cam_id,
-            "--imgsz", str(req.imgsz),
-            "--no-display",
-        ]
-
-        if req.source_type == "test_video" or req.source in ["test_video", "file"]:
-            video_path = app_dir.parent / "test_videos" / "tracking_test.mp4"
-            output_path = app_dir.parent / "test_videos" / "annotated_tracking_test.mp4"
-            cmd.extend(["--input", str(video_path), "--output", str(output_path)])
-        else:
-            cmd.extend(["--input", str(req.source)])
-
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
-        )
-        ACTIVE_STREAM_PROCESSES[cam_id] = proc
+    MANUALLY_STOPPED_CAMERAS.discard(cam_id)
+    proc = launch_analytics_stream(
+        camera_id=cam_id,
+        source_type=req.source_type,
+        source=req.source,
+        imgsz=req.imgsz,
+    )
 
     await ws_manager.broadcast_json({
         "type": "stream_started",
         "camera_id": cam_id,
         "source_type": req.source_type,
+        "source": req.source,
         "pid": proc.pid,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
@@ -996,8 +1135,9 @@ async def start_camera_stream(
         "status": "started",
         "camera_id": cam_id,
         "source_type": req.source_type,
+        "source": req.source,
         "pid": proc.pid,
-        "message": f"Camera '{cam_id}' ({req.source_type}) started successfully.",
+        "message": f"Camera '{cam_id}' ({req.source_type}) started in continuous surveillance loop.",
     }
 
 
@@ -1007,6 +1147,7 @@ async def stop_camera_stream(
     current_user: dict = Depends(get_current_user),
 ):
     """Stop active camera analytics process with 1-click."""
+    MANUALLY_STOPPED_CAMERAS.add(camera_id)
     with STREAM_PROCESSES_LOCK:
         proc = ACTIVE_STREAM_PROCESSES.pop(camera_id, None)
         if proc and proc.poll() is None:
@@ -1018,6 +1159,18 @@ async def stop_camera_stream(
                     proc.kill()
                 except Exception:
                     pass
+
+    # Clear cached frames from memory and disk so no stale frames display
+    hub = get_frame_hub()
+    if hub:
+        hub.remove_camera(camera_id)
+    backend_dir = Path(__file__).resolve().parent.parent
+    live_frame_path = backend_dir / f"live_frame_{camera_id}.jpg"
+    try:
+        if live_frame_path.exists():
+            live_frame_path.unlink()
+    except Exception:
+        pass
 
     await ws_manager.broadcast_json({
         "type": "stream_stopped",

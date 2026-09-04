@@ -198,6 +198,12 @@ class FrameHub:
                 return (time.time() - rec["timestamp"]) <= max_age
         return False
 
+    def remove_camera(self, camera_id: str) -> None:
+        """Clear cached frame and telemetry when a camera is stopped by the operator."""
+        with self._thread_lock:
+            self._frames.pop(camera_id, None)
+            self._camera_telemetry.pop(camera_id, None)
+
 
 # Global singleton instance
 frame_hub = FrameHub()

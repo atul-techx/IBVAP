@@ -32,18 +32,7 @@ export default function StatsRow({ stats }) {
   const occupancy = footfall.current_occupancy ?? 0;
 
   return (
-    <div className="stats-grid" role="region" aria-label="Real-Time Analytics Metrics">
-      {/* Total Detections */}
-      <div className="stat-card" style={{ '--stat-accent': 'var(--border-accent)' }}>
-        <div className="stat-icon-wrapper">
-          <Activity size={22} />
-        </div>
-        <div className="stat-info">
-          <span className="stat-label">Total Events</span>
-          <span className="stat-value">{totalEvents}</span>
-        </div>
-      </div>
-
+    <div className="stats-grid" role="region" aria-label="Real-Time Analytics Metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
       {/* Critical Intrusions */}
       <div className="stat-card" style={{ '--stat-accent': 'var(--color-high)' }}>
         <div
@@ -60,7 +49,18 @@ export default function StatsRow({ stats }) {
         </div>
       </div>
 
-      {/* Sector Occupancy (Pillar 2) */}
+      {/* Total Detections */}
+      <div className="stat-card" style={{ '--stat-accent': 'var(--border-accent)' }}>
+        <div className="stat-icon-wrapper">
+          <Activity size={22} />
+        </div>
+        <div className="stat-info">
+          <span className="stat-label">Total Events</span>
+          <span className="stat-value">{totalEvents}</span>
+        </div>
+      </div>
+
+      {/* Sector Occupancy & Footfall */}
       <div className="stat-card" style={{ '--stat-accent': '#06b6d4' }}>
         <div
           className="stat-icon-wrapper"
@@ -70,56 +70,32 @@ export default function StatsRow({ stats }) {
         </div>
         <div className="stat-info">
           <span className="stat-label">Sector Occupancy</span>
-          <span className="stat-value" style={{ color: '#38bdf8' }}>
-            {occupancy} <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500 }}>INSIDE</span>
-          </span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <span className="stat-value" style={{ color: '#38bdf8' }}>
+              {occupancy}
+            </span>
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
+              [+{totalIn} in / -{totalOut} out]
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Bidirectional Footfall (IN / OUT) */}
+      {/* Active Surveillance Sectors */}
       <div className="stat-card" style={{ '--stat-accent': '#10b981' }}>
         <div
           className="stat-icon-wrapper"
-          style={{ color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.35)' }}
-        >
-          <ArrowDownRight size={22} />
-        </div>
-        <div className="stat-info">
-          <span className="stat-label">Footfall (In / Out)</span>
-          <span className="stat-value" style={{ fontSize: '1.25rem' }}>
-            <span style={{ color: '#34d399' }}>+{totalIn}</span> <span style={{ color: '#64748b' }}>/</span> <span style={{ color: '#fbbf24' }}>-{totalOut}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Suspicious / Vehicle Warnings */}
-      <div className="stat-card" style={{ '--stat-accent': 'var(--color-medium)' }}>
-        <div
-          className="stat-icon-wrapper"
-          style={{ color: 'var(--color-medium)', background: 'var(--color-medium-bg)', borderColor: 'var(--color-medium-border)' }}
-        >
-          <AlertTriangle size={22} />
-        </div>
-        <div className="stat-info">
-          <span className="stat-label">Suspicious / Vehicle</span>
-          <span className="stat-value" style={{ color: 'var(--color-medium)' }}>
-            {medCount}
-          </span>
-        </div>
-      </div>
-
-      {/* Active Sectors */}
-      <div className="stat-card" style={{ '--stat-accent': 'var(--color-purple)' }}>
-        <div
-          className="stat-icon-wrapper"
-          style={{ color: 'var(--color-purple)', background: 'rgba(168, 85, 247, 0.14)', borderColor: 'rgba(168, 85, 247, 0.35)' }}
+          style={{ color: '#10b981', background: 'rgba(16, 185, 129, 0.14)', borderColor: 'rgba(16, 185, 129, 0.35)' }}
         >
           <Video size={22} />
         </div>
         <div className="stat-info">
           <span className="stat-label">Active Sectors</span>
-          <span className="stat-value" style={{ fontSize: '1.45rem', marginTop: '0.35rem' }}>
-            {activeCameras} / {totalCameras} <span style={{ fontSize: '0.8rem', color: '#34d399', fontWeight: 600 }}>ONLINE</span>
+          <span className="stat-value" style={{ fontSize: '1.35rem' }}>
+            {activeCameras} / {totalCameras}{' '}
+            <span style={{ fontSize: '0.8rem', color: '#34d399', fontWeight: 700, marginLeft: '0.35rem' }}>
+              ONLINE
+            </span>
           </span>
         </div>
       </div>

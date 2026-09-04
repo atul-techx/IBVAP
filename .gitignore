@@ -58,3 +58,8 @@ backend/test_*.mp4
 Thumbs.db
 desktop.ini
 *.log
+
+# Temp UI screenshots & Vite timestamp artifacts
+/*.png
+*.mjs.timestamp*
+vite.config.js.timestamp-*
