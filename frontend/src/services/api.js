@@ -4,8 +4,11 @@
  * Maintains in-memory JWT session token and role authorization headers.
  */
 
-export const API_BASE = 'http://127.0.0.1:8000';
-export const WS_BASE = 'ws://127.0.0.1:8000';
+// In browser, using relative path '' routes through Vite reverse proxy on same origin, avoiding CORB and CORS issues
+export const API_BASE = typeof window !== 'undefined' ? '' : 'http://127.0.0.1:8000';
+export const WS_BASE = typeof window !== 'undefined'
+  ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+  : 'ws://127.0.0.1:8000';
 
 // In-memory token storage (strictly not stored in localStorage to prevent XSS token theft)
 let _authToken = null;
@@ -209,6 +212,14 @@ export async function fetchStreamStatus() {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch stream status');
+  return res.json();
+}
+
+export async function fetchAvailableVideos() {
+  const res = await fetch(`${API_BASE}/api/stream/videos`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) return { videos: [] };
   return res.json();
 }
 

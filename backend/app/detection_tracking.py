@@ -481,12 +481,12 @@ class SuspiciousBehaviorDetector:
     """
     def __init__(
         self,
-        loiter_radius_px: float = 45.0,
-        loiter_min_frames: int = 35,
-        pacing_window_frames: int = 40,
+        loiter_radius_px: float = 40.0,
+        loiter_min_frames: int = 70,
+        pacing_window_frames: int = 60,
         pacing_min_reversals: int = 3,
-        pacing_min_dist_px: float = 25.0,
-        near_zone_distance_px: float = 120.0,
+        pacing_min_dist_px: float = 85.0,
+        near_zone_distance_px: float = 90.0,
     ):
         self.loiter_radius_px = loiter_radius_px
         self.loiter_min_frames = loiter_min_frames
@@ -520,9 +520,9 @@ class SuspiciousBehaviorDetector:
             self.position_histories[tracker_id] = deque(maxlen=150)
             self.alert_states[tracker_id] = {
                 "loiter_alerted": False,
-                "loiter_alert_frame": 0,
+                "loiter_alert_frame": -999,
                 "pacing_alerted": False,
-                "pacing_alert_frame": 0,
+                "pacing_alert_frame": -999,
                 "active_behavior": None,
             }
 
@@ -558,10 +558,10 @@ class SuspiciousBehaviorDetector:
                     if st["active_behavior"] == "LOITERING":
                         st["active_behavior"] = None
 
-        # 2. Check Pacing Anomaly (Erratic horizontal direction reversals)
-        if len(history) >= 18:
+        # 2. Check Pacing Anomaly (Genuine lateral traversal with significant physical displacement)
+        if len(history) >= 24:
             window_pts = [p for p in history if (frame_idx - p[0]) <= self.pacing_window_frames]
-            if len(window_pts) >= 12:
+            if len(window_pts) >= 16:
                 # Sample every 3 frames to smooth micro-jitter
                 sampled_x = [window_pts[k][1] for k in range(0, len(window_pts), 3)]
                 if len(sampled_x) >= 4:
@@ -570,20 +570,23 @@ class SuspiciousBehaviorDetector:
                     last_dir = 0
                     accum_dist = 0
                     for d in diffs:
-                        if abs(d) >= 7:  # Significant horizontal movement
+                        if abs(d) >= 18:  # Significant physical stride (filters out camera/head jitter)
                             curr_dir = 1 if d > 0 else -1
                             if last_dir != 0 and curr_dir != last_dir:
                                 reversals += 1
                             last_dir = curr_dir
                             accum_dist += abs(d)
 
-                    if reversals >= self.pacing_min_reversals and accum_dist >= self.pacing_min_dist_px:
+                    # Total spatial trajectory corridor spread (must be traversing actual ground, not sitting/swaying)
+                    x_spread = float(max(sampled_x) - min(sampled_x))
+
+                    if x_spread >= 90.0 and reversals >= self.pacing_min_reversals and accum_dist >= self.pacing_min_dist_px:
                         st["active_behavior"] = "PACING"
                         if (not st["pacing_alerted"]) or (frame_idx - st["pacing_alert_frame"] >= 75):
                             st["pacing_alerted"] = True
                             st["pacing_alert_frame"] = frame_idx
                             triggered_events.append("suspicious_pacing")
-                    elif reversals == 0 and accum_dist < 10:
+                    elif reversals == 0 or x_spread < 35.0:
                         st["pacing_alerted"] = False
                         if st["active_behavior"] == "PACING":
                             st["active_behavior"] = None
@@ -624,17 +627,19 @@ def load_yolo_model(model_path: Path) -> YOLO:
 
 
 def draw_restricted_zone(frame: np.ndarray, polygon: np.ndarray, is_intruded: bool):
-    """Draw a semi-transparent polygon zone overlay with security status border."""
+    """
+    Draw a sleek tactical cyber perimeter zone overlay.
+    Uses clean neon borders with corner reticles and an ultra-light transparent interior,
+    ensuring background objects (furniture, trees, cupboards) are never obscured or mistaken for detections.
+    """
+    border_color = (0, 0, 245) if is_intruded else (255, 200, 0)
+
+    # Ultra-subtle tint (alpha <= 0.04) only to give a faint atmospheric holographic field
     overlay = frame.copy()
-    zone_color = (0, 0, 220) if is_intruded else (255, 180, 0)
-    alpha = 0.22 if is_intruded else 0.12
+    cv2.fillPoly(overlay, [polygon], (0, 0, 180) if is_intruded else (255, 180, 0))
+    cv2.addWeighted(overlay, 0.04 if is_intruded else 0.02, frame, 0.96 if is_intruded else 0.98, 0, frame)
 
-    # Draw semi-transparent fill
-    cv2.fillPoly(overlay, [polygon], zone_color)
-    cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame)
-
-    # Draw thick outline
-    border_color = (0, 0, 255) if is_intruded else (255, 200, 0)
+    # Draw crisp tactical boundary line
     cv2.polylines(
         frame,
         [polygon],
@@ -644,30 +649,38 @@ def draw_restricted_zone(frame: np.ndarray, polygon: np.ndarray, is_intruded: bo
         lineType=cv2.LINE_AA,
     )
 
-    # Draw zone status banner above the top edge of polygon
+    # Draw high-tech tactical corner reticles (L-brackets) on polygon vertices
+    reticle_len = 16
+    for pt in polygon:
+        px, py = int(pt[0]), int(pt[1])
+        cv2.line(frame, (px - reticle_len, py), (px + reticle_len, py), border_color, 2, cv2.LINE_AA)
+        cv2.line(frame, (px, py - reticle_len), (px, py + reticle_len), border_color, 2, cv2.LINE_AA)
+        cv2.circle(frame, (px, py), 3, (255, 255, 255), -1, cv2.LINE_AA)
+
+    # Draw explicit Virtual Geo-Fence status banner
     top_left = polygon[0]
     status_text = (
-        "RESTRICTED ZONE [ALERT: INTRUSION ACTIVE]"
+        "[ VIRTUAL GEO-FENCE ] ALERT: INTRUSION DETECTED"
         if is_intruded
-        else "RESTRICTED BORDER ZONE [STATUS: CLEAR]"
+        else "[ VIRTUAL GEO-FENCE ] STATUS: PERIMETER SECURE"
     )
-    text_color = (0, 0, 255) if is_intruded else (0, 255, 255)
+    text_color = (0, 0, 255) if is_intruded else (0, 240, 255)
 
-    tx = max(10, top_left[0])
-    ty = max(25, top_left[1] - 10)
-    (tw, th), baseline = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+    tx = max(10, int(top_left[0]))
+    ty = max(24, int(top_left[1]) - 10)
+    (tw, th), baseline = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
     cv2.rectangle(
         frame,
         (tx - 4, ty - th - baseline - 4),
-        (tx + tw + 4, ty + baseline),
-        (20, 20, 20),
+        (tx + tw + 6, ty + baseline),
+        (15, 23, 42),
         -1,
     )
     cv2.rectangle(
         frame,
         (tx - 4, ty - th - baseline - 4),
-        (tx + tw + 4, ty + baseline),
-        text_color,
+        (tx + tw + 6, ty + baseline),
+        border_color,
         1,
     )
     cv2.putText(
@@ -675,9 +688,9 @@ def draw_restricted_zone(frame: np.ndarray, polygon: np.ndarray, is_intruded: bo
         status_text,
         (tx, ty - 2),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
+        0.48,
         text_color,
-        2,
+        1,
         cv2.LINE_AA,
     )
 
@@ -812,6 +825,7 @@ def run_tracking_and_fence(
     low_light_thresh: float = 65.0,
     weather_mode: bool = True,
     weather_dehaze_method: str = "dcp",
+    loop: bool = True,
 ):
     """Run ByteTrack tracking and polygon virtual fence intrusion detection with live reconnect support, Appearance Re-ID, Night-Mode CLAHE, and Weather-Adaptive Dehazing."""
     is_webcam = isinstance(input_source, int)
@@ -869,7 +883,12 @@ def run_tracking_and_fence(
 
     # Scale normalized polygon to match actual video frame resolution
     if polygon_points is None:
-        polygon = (DEFAULT_NORMALIZED_POLYGON * [width, height]).astype(np.int32)
+        if is_webcam:
+            # Dedicated side perimeter corridor for webcam mode so sitting at desk/center does not trigger zone
+            webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
+            polygon = (webcam_poly * [width, height]).astype(np.int32)
+        else:
+            polygon = (DEFAULT_NORMALIZED_POLYGON * [width, height]).astype(np.int32)
     else:
         polygon = polygon_points.astype(np.int32)
 
@@ -1023,7 +1042,16 @@ def run_tracking_and_fence(
                     else:
                         continue
                 else:
-                    # Video file ended
+                    # Video file ended -> Rewind if loop enabled
+                    if loop:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = cap.read()
+                        if not ret or frame is None:
+                            cap.release()
+                            cap = open_video_capture(input_source)
+                            ret, frame = cap.read()
+                        if ret and frame is not None:
+                            continue
                     break
 
             # Successful frame read, reset reconnect counter
@@ -1109,6 +1137,26 @@ def run_tracking_and_fence(
                     x1, y1, x2, y2 = map(int, detections.xyxy[i].tolist())
                     bbox_coords = [float(x1), float(y1), float(x2), float(y2)]
                     cls_name = model.names.get(cls_id, f"cls_{cls_id}")
+
+                    # Anti-False-Positive Filter for Inanimate Background Objects (Furniture, Trees, Walls, Cupboards)
+                    bw = x2 - x1
+                    bh = y2 - y1
+                    if cls_name == "person":
+                        if bh <= 0 or bw <= 0:
+                            continue
+                        aspect_ratio = bh / float(bw)
+                        # Humans have vertical aspect ratio (height >= 0.90 * width). Reject horizontal furniture/shelves.
+                        if aspect_ratio < 0.90:
+                            continue
+                        # Reject micro pixel noise
+                        if bw < 25 or bh < 38:
+                            continue
+                        # Enforce confident detection
+                        if confidence < 0.50:
+                            continue
+                    elif cls_name in ["car", "bus", "truck"]:
+                        if bw < 30 or bh < 25 or confidence < 0.45:
+                            continue
 
                     # Resolve raw ByteTrack ID to Canonical Track ID via Appearance Re-ID
                     tracker_id = reid_engine.get_or_match_id(
@@ -2123,6 +2171,18 @@ def main():
         default="dcp",
         help="Dehazing algorithm to use: 'dcp' (Dark Channel Prior) or 'fast' (Multi-channel contrast/saturation) (default: dcp)",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        default=True,
+        help="Loop video file continuously for persistent surveillance stream",
+    )
+    parser.add_argument(
+        "--no-loop",
+        dest="loop",
+        action="store_false",
+        help="Disable looping video input",
+    )
 
     args = parser.parse_args()
 
@@ -2188,6 +2248,7 @@ def main():
         low_light_thresh=args.low_light_thresh,
         weather_mode=args.weather_mode,
         weather_dehaze_method=args.weather_dehaze_method,
+        loop=args.loop,
     )
 
 

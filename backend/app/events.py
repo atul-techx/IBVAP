@@ -525,6 +525,26 @@ def init_db(db_path: Optional[Path] = None) -> Path:
                OR UPPER(camera_id) IN ('UNKNOWN', 'N/A', 'NONE')
             """
         )
+
+        # Ensure default camera network is registered for multi-camera surveillance
+        default_cameras = [
+            ("CAM_01", "Sector 01 Gate", "North Perimeter Fence - Sector 01", "1280x720", 30.0, "Polygon Alpha (Gate 1)"),
+            ("CAM_02", "Sector 02 East Fence", "East Perimeter Line - Sector 02", "1280x720", 30.0, "Polygon Beta (Perimeter 2)"),
+            ("CAM_03", "Sector 03 Southern Outpost", "South River Boundary - Sector 03", "1280x720", 30.0, "Polygon Gamma (Outpost 3)"),
+            ("CAM_04", "Sector 04 Road Checkpoint", "Main Highway Checkpoint Alpha", "1280x720", 30.0, "Polygon Delta (Checkpoint 4)"),
+        ]
+        now_seed = datetime.now(timezone.utc).isoformat()
+        for c_id, c_name, c_loc, c_res, c_fps, c_zone in default_cameras:
+            cursor.execute(
+                """
+                INSERT INTO cameras (camera_id, name, location, resolution, fps, monitored_zone, last_seen, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'online')
+                ON CONFLICT(camera_id) DO UPDATE SET
+                    name = excluded.name,
+                    location = excluded.location
+                """,
+                (c_id, c_name, c_loc, c_res, c_fps, c_zone, now_seed),
+            )
         conn.commit()
 
     if init_users_table is not None:

@@ -27,6 +27,7 @@ function DashboardContent() {
   const [isVoiceSpeaking, setIsVoiceSpeaking] = useState(false);
   const [lastEventTime, setLastEventTime] = useState(null);
   const wsRef = useRef(null);
+  const lastStatsFetchRef = useRef(0);
 
   // Subscribe to voice alert service state
   useEffect(() => {
@@ -171,24 +172,27 @@ function DashboardContent() {
           console.log('[WS] Received Live Security Event:', data.event_id, data.object_class, data.event_type);
           setLastEventTime(Date.now());
 
-          // Deduplicate by event_id before adding to state
+          // Deduplicate by event_id before adding to state (capped to 40 items to prevent DOM bloat)
           let isNewEvent = false;
           setLiveEvents((prev) => {
             if (prev.some((e) => e.event_id === data.event_id)) {
-              console.warn('[WS] Duplicate event ignored in state:', data.event_id);
               return prev;
             }
             isNewEvent = true;
-            return [data, ...prev];
+            return [data, ...prev].slice(0, 40);
           });
 
           // Trigger tactical voice alert for high severity events
-          if (isNewEvent || !liveEvents.some((e) => e.event_id === data.event_id)) {
+          if (isNewEvent) {
             voiceAlertService.announceEvent(data);
           }
 
-          // Refresh dashboard metrics
-          fetchStats().then(setStats).catch(console.error);
+          // Throttle dashboard metrics refresh (at most once every 3.5s) to eliminate rendering lag
+          const now = Date.now();
+          if (now - lastStatsFetchRef.current >= 3500) {
+            lastStatsFetchRef.current = now;
+            fetchStats().then(setStats).catch(() => {});
+          }
         } catch (e) {
           console.error('[WS] Error processing message:', e);
         }

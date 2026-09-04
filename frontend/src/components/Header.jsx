@@ -46,7 +46,6 @@ export default function Header({
         <div>
           <div className="brand-title">
             IBVAP <span style={{ color: '#0ea5e9' }}>CORE</span>
-            <span className="badge-tag">SIH 2026</span>
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.01em' }}>
             Intelligent Border Video Analytics Platform
