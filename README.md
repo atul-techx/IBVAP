@@ -1,6 +1,6 @@
 # IBVAP – Intelligent Border Video Analytics Platform
 
-**Smart India Hackathon 2026**
+***Smart India Hackathon 2026***
 
 IBVAP is an automated, AI-powered border surveillance and video analytics platform engineered to process real-time border camera feeds, detect critical activity (such as unauthorized persons, anomalous vehicle movements, intrusion events), and deliver actionable situational awareness to security personnel.
 
