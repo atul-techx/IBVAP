@@ -188,7 +188,8 @@ export async function startStream(cameraId = 'CAM_01', options = {}) {
       camera_id: cameraId,
       source: options.source !== undefined ? String(options.source) : '0',
       source_type: options.sourceType || 'webcam',
-      imgsz: options.imgsz || 480,
+      imgsz: options.imgsz || (options.sourceType === 'webcam' ? 384 : 480),
+      show_zone: options.showZone !== undefined ? options.showZone : true,
     }),
   });
   if (!res.ok) {

@@ -20,6 +20,7 @@ import argparse
 import math
 import os
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -27,6 +28,13 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 import cv2
 import numpy as np
+
+
+def get_live_frame_path(camera_id: str) -> Path:
+    """Fast OS temp directory path to bypass OneDrive sync locks and latency."""
+    temp_dir = Path(tempfile.gettempdir()) / "ibvap_live"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir / f"live_frame_{camera_id}.jpg"
 import supervision as sv
 import torch
 from ultralytics import YOLO
@@ -792,10 +800,15 @@ class ThreadedLiveStream:
 def open_video_capture(source: str | int):
     """Open OpenCV VideoCapture supporting Webcam index, RTSP/HTTP URL, or file path."""
     if isinstance(source, int):
-        # On Windows, cv2.CAP_DSHOW or default CAP_ANY
+        # On Windows, cv2.CAP_DSHOW provides fast hardware webcam initialization
         cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
         if not cap.isOpened():
             cap = cv2.VideoCapture(source)
+        try:
+            # Set minimal buffer to eliminate video lag and frame queuing
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
         return cap
     elif isinstance(source, str) and (source.startswith("rtsp://") or source.startswith("http://") or source.startswith("https://")):
         # Network RTSP / HTTP IP Camera Stream
@@ -826,6 +839,7 @@ def run_tracking_and_fence(
     weather_mode: bool = True,
     weather_dehaze_method: str = "dcp",
     loop: bool = True,
+    show_zone: bool = True,
 ):
     """Run ByteTrack tracking and polygon virtual fence intrusion detection with live reconnect support, Appearance Re-ID, Night-Mode CLAHE, and Weather-Adaptive Dehazing."""
     is_webcam = isinstance(input_source, int)
@@ -922,8 +936,8 @@ def run_tracking_and_fence(
 
     # Warm up camera sensor for live/webcam sources to allow auto-exposure & white balance to settle
     if is_webcam:
-        print("[*] Warming up camera sensor (skipping initial 15 warmup frames)...")
-        for _ in range(15):
+        print("[*] Warming up camera sensor (skipping initial 3 warmup frames)...")
+        for _ in range(3):
             cap.read()
 
     # Initialize video output writer (only if output_path is requested)
@@ -1073,8 +1087,13 @@ def run_tracking_and_fence(
 
             # Stage 1: Environmental Condition Analysis (Fog/Haze & Night Low-Light) - Cached every 20 frames
             if frame_idx == 1 or (frame_idx % 20 == 0):
-                is_hazy, haze_score, haze_metrics = compute_fog_haze_metric(frame)
-                is_weather_mode_active = weather_mode and is_hazy
+                if is_webcam:
+                    # Indoor webcam does not experience atmospheric fog; avoid CPU-heavy DCP dehazing
+                    is_hazy, haze_score, haze_metrics = False, 0.0, {}
+                    is_weather_mode_active = False
+                else:
+                    is_hazy, haze_score, haze_metrics = compute_fog_haze_metric(frame)
+                    is_weather_mode_active = weather_mode and is_hazy
 
                 frame_brightness = compute_frame_brightness(frame)
                 is_night_mode_active = night_mode and (frame_brightness < low_light_thresh)
@@ -1121,16 +1140,14 @@ def run_tracking_and_fence(
             if (
                 detections is not None
                 and len(detections) > 0
-                and detections.tracker_id is not None
             ):
+                has_tracker_ids = detections.tracker_id is not None
                 for i in range(len(detections)):
                     raw_tracker_id = (
                         int(detections.tracker_id[i])
-                        if detections.tracker_id[i] is not None
-                        else None
+                        if (has_tracker_ids and detections.tracker_id[i] is not None)
+                        else (i + 1)
                     )
-                    if raw_tracker_id is None:
-                        continue
 
                     cls_id = int(detections.class_id[i])
                     confidence = float(detections.confidence[i])
@@ -1145,14 +1162,16 @@ def run_tracking_and_fence(
                         if bh <= 0 or bw <= 0:
                             continue
                         aspect_ratio = bh / float(bw)
-                        # Humans have vertical aspect ratio (height >= 0.90 * width). Reject horizontal furniture/shelves.
-                        if aspect_ratio < 0.90:
+                        # Humans sitting in front of webcam have lower aspect ratio (~0.45 - 0.85) due to wide shoulders
+                        min_aspect = 0.40 if is_webcam else 0.50
+                        if aspect_ratio < min_aspect:
                             continue
                         # Reject micro pixel noise
-                        if bw < 25 or bh < 38:
+                        if bw < 20 or bh < 25:
                             continue
-                        # Enforce confident detection
-                        if confidence < 0.50:
+                        # Enforce responsive detection threshold for instant appearance
+                        min_conf = 0.32 if is_webcam else 0.38
+                        if confidence < min_conf:
                             continue
                     elif cls_name in ["car", "bus", "truck"]:
                         if bw < 30 or bh < 25 or confidence < 0.45:
@@ -1180,8 +1199,8 @@ def run_tracking_and_fence(
                             cached_f = face_recog_cache.get(tracker_id)
                             face_bbox = cached_f.get("face_bbox") if cached_f else None
 
-                            # Periodically (every 30 frames) or if face_bbox is None, refresh face bounding box coords for HUD
-                            if cached_f is None or (frame_idx - cached_f.get("last_checked", 0)) >= 30 or face_bbox is None:
+                            # Periodically (every 45 frames) or if face_bbox is None, refresh face bounding box coords for HUD
+                            if cached_f is None or (frame_idx - cached_f.get("last_checked", 0)) >= 45 or face_bbox is None:
                                 f_name, f_conf, f_coords = watchlist_recognizer.identify_face_in_person_crop(frame, (x1, y1, x2, y2))
                                 if f_coords is not None:
                                     face_bbox = f_coords
@@ -1196,9 +1215,9 @@ def run_tracking_and_fence(
                                     "last_checked": frame_idx,
                                 }
                         else:
-                            # 2. Not yet confirmed: check face every 3 frames or on initial appearance
+                            # 2. Not yet confirmed: check face on initial appearance (cached_f is None) immediately, then throttle to every 8 frames
                             cached_f = face_recog_cache.get(tracker_id)
-                            should_check_face = (cached_f is None or (frame_idx - cached_f.get("last_checked", 0)) >= 3)
+                            should_check_face = (cached_f is None or (frame_idx - cached_f.get("last_checked", 0)) >= 8)
                             if should_check_face:
                                 f_name, f_conf, f_coords = watchlist_recognizer.identify_face_in_person_crop(frame, (x1, y1, x2, y2))
                                 face_bbox = f_coords
@@ -1286,10 +1305,14 @@ def run_tracking_and_fence(
                     center_point = (int((x1 + x2) / 2), int((y1 + y2) / 2))
 
                     # Test if object is inside restricted polygon (foot or center)
-                    poly_foot = cv2.pointPolygonTest(polygon, (float(foot_point[0]), float(foot_point[1])), True)
-                    poly_center = cv2.pointPolygonTest(polygon, (float(center_point[0]), float(center_point[1])), True)
-                    is_inside = (poly_foot >= 0 or poly_center >= 0)
-                    dist_to_zone = 0.0 if is_inside else min(abs(poly_foot), abs(poly_center))
+                    if show_zone:
+                        poly_foot = cv2.pointPolygonTest(polygon, (float(foot_point[0]), float(foot_point[1])), True)
+                        poly_center = cv2.pointPolygonTest(polygon, (float(center_point[0]), float(center_point[1])), True)
+                        is_inside = (poly_foot >= 0 or poly_center >= 0)
+                        dist_to_zone = 0.0 if is_inside else min(abs(poly_foot), abs(poly_center))
+                    else:
+                        is_inside = False
+                        dist_to_zone = 999.0
 
                     # Check if target is an authorized/watchlisted person
                     is_person_auth = (
@@ -1732,8 +1755,9 @@ def run_tracking_and_fence(
                     )
 
             # Draw Restricted Zone Polygon Overlay
-            is_zone_intruded = len(current_intruders) > 0
-            draw_restricted_zone(frame, polygon, is_zone_intruded)
+            is_zone_intruded = (len(current_intruders) > 0) if show_zone else False
+            if show_zone:
+                draw_restricted_zone(frame, polygon, is_zone_intruded)
 
             # Collect Hardware Telemetry for HUD
             cpu_metric_str = ""
@@ -1750,11 +1774,14 @@ def run_tracking_and_fence(
             cv2.rectangle(frame, (0, 0), (width, 54), hud_bg_color, -1)
             cv2.line(frame, (0, 54), (width, 54), (0, 0, 255) if is_zone_intruded else (0, 200, 255), 2)
 
-            intruder_summary = (
-                f"INTRUDERS IN SECTOR: {len(current_intruders)}"
-                if is_zone_intruded
-                else "PERIMETER: SECURE"
-            )
+            if not show_zone:
+                intruder_summary = "VIRTUAL FENCE: OFF (FULL SECTOR VIEW)"
+            else:
+                intruder_summary = (
+                    f"INTRUDERS IN SECTOR: {len(current_intruders)}"
+                    if is_zone_intruded
+                    else "PERIMETER: SECURE"
+                )
             hud_tier1 = (
                 f"IBVAP | {camera_id} ({resolved_cam_name}) | Frame: {frame_idx:04d} | {current_fps:4.1f} FPS"
                 f"{cpu_metric_str}{ram_metric_str} | {intruder_summary}"
@@ -1891,12 +1918,24 @@ def run_tracking_and_fence(
                     _, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72, cv2.IMWRITE_JPEG_OPTIMIZE, 0])
                     enc_buf = enc.tobytes()
 
-                backend_dir = Path(__file__).resolve().parent.parent
-                live_tmp_path = backend_dir / f".live_frame_{camera_id}.tmp.jpg"
-                live_frame_path = backend_dir / f"live_frame_{camera_id}.jpg"
-                with open(live_tmp_path, "wb") as f:
+                # Write to high-speed OS temp path to bypass OneDrive sync latency & file locks
+                fast_frame_path = get_live_frame_path(camera_id)
+                fast_tmp_path = fast_frame_path.parent / f".{fast_frame_path.name}.tmp"
+                with open(fast_tmp_path, "wb") as f:
                     f.write(enc_buf)
-                live_tmp_path.replace(live_frame_path)
+                fast_tmp_path.replace(fast_frame_path)
+
+                # Periodic fallback disk write (every 30 frames) to backend_dir for static tools
+                if frame_idx % 30 == 0:
+                    try:
+                        backend_dir = Path(__file__).resolve().parent.parent
+                        live_tmp_path = backend_dir / f".live_frame_{camera_id}.tmp.jpg"
+                        live_frame_path = backend_dir / f"live_frame_{camera_id}.jpg"
+                        with open(live_tmp_path, "wb") as f:
+                            f.write(enc_buf)
+                        live_tmp_path.replace(live_frame_path)
+                    except Exception:
+                        pass
 
                 # Periodic Heartbeat every 30 frames
                 if frame_idx % 30 == 0:
@@ -2172,6 +2211,19 @@ def main():
         help="Dehazing algorithm to use: 'dcp' (Dark Channel Prior) or 'fast' (Multi-channel contrast/saturation) (default: dcp)",
     )
     parser.add_argument(
+        "--show-zone",
+        dest="show_zone",
+        action="store_true",
+        default=True,
+        help="Enable drawing and intrusion alerts for polygon virtual fence (default: True)",
+    )
+    parser.add_argument(
+        "--no-zone",
+        dest="show_zone",
+        action="store_false",
+        help="Disable drawing and intrusion alerts for polygon virtual fence",
+    )
+    parser.add_argument(
         "--loop",
         action="store_true",
         default=True,
@@ -2249,6 +2301,7 @@ def main():
         weather_mode=args.weather_mode,
         weather_dehaze_method=args.weather_dehaze_method,
         loop=args.loop,
+        show_zone=args.show_zone,
     )
 
 
