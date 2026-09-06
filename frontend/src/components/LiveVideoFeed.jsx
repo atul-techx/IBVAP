@@ -46,7 +46,8 @@ export default function LiveVideoFeed({
   const [selectedVideo, setSelectedVideo] = useState('sample.mp4');
   const [isControllingStream, setIsControllingStream] = useState(false);
   const [streamMode, setStreamMode] = useState('mjpeg'); // 'mjpeg' | 'fallback_frame'
-  const [fallbackFrameUrl, setFallbackFrameUrl] = useState('');
+  const [showZone, setShowZone] = useState(true);
+  const [activeSourceType, setActiveSourceType] = useState('test_video');
   const [manuallyStopped, setManuallyStopped] = useState(false);
   const videoContainerRef = useRef(null);
   const fallbackIntervalRef = useRef(null);
@@ -137,6 +138,7 @@ export default function LiveVideoFeed({
 
   // 1-Click Launch or Switch Surveillance Video Feed (Continuous Loop)
   const handleStartVideoFeed = async (videoFilename = selectedVideo) => {
+    setActiveSourceType('test_video');
     setManuallyStopped(false);
     setIsControllingStream(true);
     setHasError(false);
@@ -147,6 +149,7 @@ export default function LiveVideoFeed({
         source: videoFilename,
         sourceType: 'test_video',
         imgsz: 480,
+        showZone: showZone,
       });
       // Short delay for pipeline initialization then refresh stream key
       setTimeout(() => {
@@ -161,18 +164,56 @@ export default function LiveVideoFeed({
 
   // 1-Click Launch Live Webcam
   const handleStartWebcam = async () => {
+    setActiveSourceType('webcam');
     setManuallyStopped(false);
     setIsControllingStream(true);
     setHasError(false);
     setIsLoaded(false);
     setStreamMode('mjpeg');
     try {
-      await startStream(cameraId, { source: '0', sourceType: 'webcam', imgsz: 384 });
+      await startStream(cameraId, {
+        source: '0',
+        sourceType: 'webcam',
+        imgsz: 384,
+        showZone: showZone,
+      });
       setTimeout(() => {
         setStreamKey(Date.now());
       }, 1200);
     } catch (err) {
       alert(`Failed to start webcam: ${err.message}`);
+    } finally {
+      setIsControllingStream(false);
+    }
+  };
+
+  // Toggle Virtual Fence Zone (Blue Box) ON / OFF
+  const handleToggleZone = async () => {
+    const nextZone = !showZone;
+    setShowZone(nextZone);
+    setManuallyStopped(false);
+    setIsControllingStream(true);
+    try {
+      if (activeSourceType === 'webcam') {
+        await startStream(cameraId, {
+          source: '0',
+          sourceType: 'webcam',
+          imgsz: 384,
+          showZone: nextZone,
+        });
+      } else {
+        await startStream(cameraId, {
+          source: selectedVideo,
+          sourceType: 'test_video',
+          imgsz: 480,
+          showZone: nextZone,
+        });
+      }
+      setTimeout(() => {
+        setStreamKey(Date.now());
+      }, 900);
+    } catch (err) {
+      console.error('Failed to toggle virtual fence:', err);
     } finally {
       setIsControllingStream(false);
     }
@@ -391,6 +432,31 @@ export default function LiveVideoFeed({
           >
             <Video size={13} />
             <span>Webcam</span>
+          </button>
+
+          {/* Virtual Fence Zone (Blue Box) Toggle Button */}
+          <button
+            className="icon-btn"
+            onClick={handleToggleZone}
+            disabled={isControllingStream}
+            title={showZone ? "Virtual Fence (Blue Box) is Active. Click to Remove / Hide." : "Virtual Fence (Blue Box) is Hidden. Click to Enable."}
+            style={{
+              background: showZone ? 'rgba(14, 165, 233, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+              border: `1px solid ${showZone ? '#38bdf8' : '#64748b'}`,
+              color: showZone ? '#38bdf8' : '#94a3b8',
+              padding: '0.35rem 0.65rem',
+              borderRadius: 'var(--radius-sm)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <Shield size={13} />
+            <span>{showZone ? 'Zone: ON' : 'Zone: OFF'}</span>
           </button>
 
           {/* Stop Stream Button */}
