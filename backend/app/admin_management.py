@@ -6,12 +6,19 @@ Provides backend database management and validation for:
 3. On-demand Watchlist embedding re-synchronization
 """
 
+import csv
+import io
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
 
 
 def get_default_db_path() -> Path:
@@ -239,6 +246,17 @@ def add_or_update_watchlist_person(
     now_iso = datetime.now(timezone.utc).isoformat()
     clean_name = name.strip()
 
+    photo_file = photo_filename.strip() if photo_filename else ""
+    if not photo_file or photo_file.lower() in ("none", "null"):
+        safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", clean_name.lower())
+        watchlist_dir = get_watchlist_dir()
+        for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+            if (watchlist_dir / f"{safe_stem}{ext}").exists():
+                photo_file = f"{safe_stem}{ext}"
+                break
+        if not photo_file:
+            photo_file = "default_avatar.png"
+
     with sqlite3.connect(db_path, timeout=10.0) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -247,12 +265,15 @@ def add_or_update_watchlist_person(
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
                 role = excluded.role,
-                photo_filename = CASE WHEN excluded.photo_filename != '' THEN excluded.photo_filename ELSE watchlist_personnel.photo_filename END,
+                photo_filename = CASE 
+                    WHEN excluded.photo_filename != '' AND excluded.photo_filename != 'default_avatar.png' THEN excluded.photo_filename 
+                    ELSE watchlist_personnel.photo_filename 
+                END,
                 expiry_date = excluded.expiry_date,
                 notes = excluded.notes,
                 updated_at = excluded.updated_at
             """,
-            (clean_name, role.strip(), photo_filename.strip(), expiry_date or None, notes or None, now_iso, now_iso),
+            (clean_name, role.strip(), photo_file, expiry_date or None, notes or None, now_iso, now_iso),
         )
         conn.commit()
 
@@ -407,3 +428,323 @@ def delete_authorized_vehicle(plate_number: str, db_path: Optional[Path] = None)
         conn.commit()
 
     return True
+
+
+# =====================================================================
+# Bulk Import & Tabular Parsing Engine (CSV & Excel .xlsx)
+# =====================================================================
+def normalize_date_input(val: Any) -> Optional[str]:
+    """Normalize various date representations (Excel datetime, DD/MM/YYYY, ISO) to YYYY-MM-DD."""
+    if val is None:
+        return None
+    if isinstance(val, (datetime, date)):
+        return val.strftime("%Y-%m-%d")
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "null", "permanent", "na", "n/a", "-", "nil"):
+        return None
+    s = s.split("T")[0].split(" ")[0]
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    m = re.search(r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$", s)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = re.search(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
+    if m:
+        return f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return s
+
+
+def parse_tabular_file(contents: bytes, filename: str) -> List[Dict[str, Any]]:
+    """
+    Parse uploaded CSV or Excel (.xlsx) file into a list of row dicts.
+    """
+    ext = Path(filename).suffix.lower()
+    rows: List[Dict[str, Any]] = []
+
+    if ext in [".xlsx", ".xlsm", ".xltx", ".xltm"]:
+        if openpyxl is None:
+            raise RuntimeError("Excel parsing module 'openpyxl' is not installed.")
+        wb = openpyxl.load_workbook(filename=io.BytesIO(contents), data_only=True)
+        ws = wb.active
+        all_values = list(ws.iter_rows(values_only=True))
+        if not all_values:
+            return []
+        header_idx = -1
+        headers = []
+        for i, r in enumerate(all_values):
+            if any(cell is not None and str(cell).strip() for cell in r):
+                header_idx = i
+                headers = [str(c).strip() if c is not None else f"col_{j}" for j, c in enumerate(r)]
+                break
+        if header_idx == -1:
+            return []
+
+        for r in all_values[header_idx + 1:]:
+            if not any(cell is not None and str(cell).strip() for cell in r):
+                continue
+            row_dict = {}
+            for j, val in enumerate(r):
+                if j < len(headers):
+                    key = headers[j]
+                    row_dict[key] = val
+            rows.append(row_dict)
+
+    elif ext in [".csv", ".tsv", ".txt"]:
+        text = None
+        for encoding in ["utf-8-sig", "utf-8", "latin-1", "cp1252"]:
+            try:
+                text = contents.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            text = contents.decode("utf-8", errors="replace")
+
+        first_lines = "\n".join(text.splitlines()[:5])
+        delimiter = ","
+        try:
+            dialect = csv.Sniffer().sniff(first_lines, delimiters=",\t;|")
+            delimiter = dialect.delimiter
+        except Exception:
+            if "\t" in first_lines:
+                delimiter = "\t"
+            elif ";" in first_lines:
+                delimiter = ";"
+
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        for r in reader:
+            if any(v and str(v).strip() for v in r.values()):
+                clean_row = {str(k).strip(): v for k, v in r.items() if k is not None}
+                rows.append(clean_row)
+    else:
+        raise ValueError(f"Unsupported file format '{ext}'. Please upload a CSV (.csv) or Excel (.xlsx) file.")
+
+    return rows
+
+
+def bulk_import_watchlist_personnel(
+    rows: List[Dict[str, Any]],
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Process rows parsed from CSV or Excel and insert/update authorized personnel.
+    """
+    if db_path is None:
+        db_path = get_default_db_path()
+    init_admin_tables(db_path)
+
+    total = len(rows)
+    added = 0
+    updated = 0
+    errors: List[str] = []
+    imported_names: List[str] = []
+
+    for idx, raw in enumerate(rows, start=1):
+        try:
+            norm_map = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in raw.items()}
+
+            def get_f(keys: List[str], default=None):
+                for k in keys:
+                    if k in norm_map and norm_map[k] is not None:
+                        s = str(norm_map[k]).strip()
+                        if s:
+                            return norm_map[k]
+                return default
+
+            name_val = get_f(["name", "fullname", "personname", "personnelname", "officername", "authorizedperson"])
+            if not name_val:
+                errors.append(f"Row {idx}: Skipped (Missing required 'Name' column)")
+                continue
+
+            name = str(name_val).strip()
+            if not name or name.lower() in ("name", "full name", "n/a", "none"):
+                continue
+
+            role_val = get_f(["role", "category", "designation", "unit", "rank", "rolecategory", "position"], default="SSB Personnel")
+            role = str(role_val).strip() if role_val else "SSB Personnel"
+
+            exp_val = get_f(["expirydate", "expiry", "validtill", "validuntil", "expirationdate", "dateofexpiry", "validupto"])
+            expiry_date = normalize_date_input(exp_val)
+
+            notes_val = get_f(["notes", "remarks", "comment", "comments", "operationalnotes", "description", "gatepass"])
+            notes = str(notes_val).strip() if notes_val else None
+
+            photo_val = get_f(["photofilename", "photo", "image", "photofile", "picture", "avatar", "portrait"])
+            photo_filename = str(photo_val).strip() if photo_val else ""
+
+            existing = get_watchlist_person(name, db_path=db_path)
+            add_or_update_watchlist_person(
+                name=name,
+                role=role,
+                photo_filename=photo_filename,
+                expiry_date=expiry_date,
+                notes=notes,
+                db_path=db_path,
+            )
+            if existing:
+                updated += 1
+            else:
+                added += 1
+            imported_names.append(name)
+
+        except Exception as e:
+            errors.append(f"Row {idx} ('{raw.get('name', 'Unknown')}'): {str(e)}")
+
+    return {
+        "status": "success",
+        "total_records": total,
+        "added": added,
+        "updated": updated,
+        "errors": errors,
+        "imported_names": imported_names,
+    }
+
+
+def bulk_import_authorized_vehicles(
+    rows: List[Dict[str, Any]],
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Process rows parsed from CSV or Excel and insert/update authorized vehicles.
+    """
+    if db_path is None:
+        db_path = get_default_db_path()
+    init_admin_tables(db_path)
+
+    total = len(rows)
+    added = 0
+    updated = 0
+    errors: List[str] = []
+    imported_plates: List[str] = []
+
+    for idx, raw in enumerate(rows, start=1):
+        try:
+            norm_map = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in raw.items()}
+
+            def get_f(keys: List[str], default=None):
+                for k in keys:
+                    if k in norm_map and norm_map[k] is not None:
+                        s = str(norm_map[k]).strip()
+                        if s:
+                            return norm_map[k]
+                return default
+
+            plate_val = get_f(["platenumber", "plate", "vehiclenumber", "registrationnumber", "rcnumber", "vehicleno"])
+            if not plate_val:
+                errors.append(f"Row {idx}: Skipped (Missing required 'Plate Number' column)")
+                continue
+
+            plate = str(plate_val).strip().upper()
+            if not plate:
+                continue
+
+            owner_val = get_f(["ownername", "owner", "driver", "assignedto", "officer", "unit"], default="Official Border Patrol Unit")
+            owner_name = str(owner_val).strip() if owner_val else "Official Border Patrol Unit"
+
+            vtype_val = get_f(["vehicletype", "type", "category", "model"], default="Patrol Vehicle")
+            vehicle_type = str(vtype_val).strip() if vtype_val else "Patrol Vehicle"
+
+            purpose_val = get_f(["purpose", "duty", "assignment", "mission", "reason"], default="Official Duty")
+            purpose = str(purpose_val).strip() if purpose_val else "Official Duty"
+
+            exp_val = get_f(["expirydate", "expiry", "validtill", "validuntil", "expirationdate"])
+            expiry_date = normalize_date_input(exp_val)
+
+            notes_val = get_f(["notes", "remarks", "comment", "description"])
+            notes = str(notes_val).strip() if notes_val else None
+
+            existing = check_authorized_vehicle(plate, db_path=db_path)
+            add_or_update_authorized_vehicle(
+                plate_number=plate,
+                owner_name=owner_name,
+                vehicle_type=vehicle_type,
+                purpose=purpose,
+                expiry_date=expiry_date,
+                notes=notes,
+                db_path=db_path,
+            )
+            if existing:
+                updated += 1
+            else:
+                added += 1
+            imported_plates.append(plate)
+
+        except Exception as e:
+            errors.append(f"Row {idx} ('{raw.get('plate_number', 'Unknown')}'): {str(e)}")
+
+    return {
+        "status": "success",
+        "total_records": total,
+        "added": added,
+        "updated": updated,
+        "errors": errors,
+        "imported_plates": imported_plates,
+    }
+
+
+def generate_sample_template(target: str = "personnel", format_type: str = "csv") -> Tuple[bytes, str, str]:
+    """
+    Generate downloadable sample template in CSV or Excel format.
+    Returns (bytes_data, media_type, filename).
+    """
+    format_type = format_type.lower()
+    if target == "personnel":
+        headers = ["Full Name", "Role / Unit", "Expiry Date", "Operational Notes", "Photo Filename"]
+        sample_rows = [
+            ["Capt. Vikram Batra", "Command Staff", "2026-12-31", "Perimeter Sector 4 Commander", "batra.jpg"],
+            ["Subedar Major Joginder", "Border Patrol Officer", "", "QRT Bravo Team Leader", ""],
+            ["Constable Ramesh Singh", "SSB Personnel", "2026-10-15", "Checkpoint Delta Guard", "ramesh.png"],
+            ["Dr. Neha Sharma", "Medical Officer", "2027-01-01", "Base Hospital Staff", ""],
+        ]
+        base_name = "ibvap_authorized_personnel_template"
+    else:
+        headers = ["Plate Number", "Owner Name", "Vehicle Type", "Purpose", "Expiry Date", "Operational Notes"]
+        sample_rows = [
+            ["DL 01 AB 1234", "Capt. Rajesh Kumar", "Patrol Jeep", "Sector 4 Perimeter Patrol", "2026-12-31", "Command Escort"],
+            ["JK 02 CD 5678", "Subedar Major Singh", "Supply Truck", "Ration & Ammo Logistics", "", "Battalion Unit"],
+            ["HR 26 EF 9012", "Dr. A. Verma", "Medical Ambulance", "Emergency Medical Support", "2027-05-30", "Quick Response"],
+        ]
+        base_name = "ibvap_authorized_vehicles_template"
+
+    if format_type in ["xlsx", "excel"]:
+        if openpyxl is None:
+            raise RuntimeError("Excel module 'openpyxl' not installed.")
+        from openpyxl.styles import Alignment, Font, PatternFill
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        ws.append(headers)
+
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="0284C7", end_color="0284C7", fill_type="solid")
+        for col_num, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col_num)].width = max(len(h) + 6, 22)
+
+        for row_data in sample_rows:
+            ws.append(row_data)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return (
+            buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            f"{base_name}.xlsx",
+        )
+    else:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        for row in sample_rows:
+            writer.writerow(row)
+        return (
+            buf.getvalue().encode("utf-8-sig"),
+            "text/csv; charset=utf-8",
+            f"{base_name}.csv",
+        )

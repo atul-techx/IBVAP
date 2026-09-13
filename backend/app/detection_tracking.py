@@ -866,10 +866,20 @@ def run_tracking_and_fence(
         cap = open_video_capture(input_source)
 
     if not cap.isOpened():
-        print(f"[!] Error: Could not open video source: {input_source}")
         if is_webcam:
-            print(f"    No webcam found at device index {input_source}.")
-        sys.exit(1)
+            print(f"[!] Warning: No physical webcam detected at index {input_source} (e.g. cloud/headless server).")
+            print("    Falling back seamlessly to sample surveillance video feed...")
+            test_videos_dir = Path(__file__).resolve().parent.parent / "test_videos"
+            sample_candidate = test_videos_dir / "sample.mp4"
+            if sample_candidate.exists():
+                input_source = str(sample_candidate)
+                is_webcam = False
+                is_live_stream = False
+                source_video_tag = "sample.mp4"
+                cap = open_video_capture(input_source)
+        if not cap.isOpened():
+            print(f"[!] Error: Could not open video source: {input_source}")
+            sys.exit(1)
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
@@ -1226,20 +1236,20 @@ def run_tracking_and_fence(
                                 f_conf = cached_f.get("identification_confidence") or 0.0
                                 face_bbox = cached_f.get("face_bbox")
 
-                            if should_check_face and f_name and f_name != "UNKNOWN" and f_conf >= 0.46:
+                            if should_check_face and f_name and f_name != "UNKNOWN" and f_conf >= 0.39:
                                 if tracker_id not in track_face_history:
                                     track_face_history[tracker_id] = deque(maxlen=10)
                                 track_face_history[tracker_id].append((frame_idx, f_name, f_conf))
 
-                                # Multi-frame consensus check (within recent 25 frames)
+                                # Multi-frame consensus check (within recent 45 frames)
                                 recent_same_matches = [
                                     (f_idx, name, conf)
                                     for (f_idx, name, conf) in track_face_history[tracker_id]
-                                    if name == f_name and (frame_idx - f_idx) <= 25
+                                    if name == f_name and (frame_idx - f_idx) <= 45
                                 ]
 
-                                # Confirm if 2+ consistent matching frames or ultra-high single match (>=0.75)
-                                if len(recent_same_matches) >= 2 or f_conf >= 0.75:
+                                # Confirm if 2+ consistent matching frames or confident match (>=0.46)
+                                if len(recent_same_matches) >= 2 or f_conf >= 0.46:
                                     avg_conf = sum(c for _, _, c in recent_same_matches) / len(recent_same_matches)
                                     confirmed_track_identities[tracker_id] = {
                                         "name": f_name,
@@ -1254,15 +1264,15 @@ def run_tracking_and_fence(
                                         f"(Consensus: {len(recent_same_matches)} frame(s), Avg Conf: {avg_conf*100:.1f}%) @ Frame {frame_idx}"
                                     )
                                 else:
-                                    # Candidate match awaiting multi-frame confirmation
-                                    identified_as = "UNKNOWN"
-                                    identification_confidence = None
+                                    # Candidate match: show candidate identity immediately (do not wipe to UNKNOWN)
+                                    identified_as = f_name
+                                    identification_confidence = round(f_conf, 3)
                             elif should_check_face:
                                 identified_as = f_name
-                                identification_confidence = None
+                                identification_confidence = f_conf if (f_conf and f_conf > 0) else None
                             else:
                                 identified_as = f_name
-                                identification_confidence = f_conf if f_conf > 0 else None
+                                identification_confidence = f_conf if (f_conf and f_conf > 0) else None
 
                             if should_check_face:
                                 face_recog_cache[tracker_id] = {
