@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import asyncio
+import os
 import subprocess
 import sys
 import tempfile
@@ -304,14 +305,16 @@ def launch_analytics_stream(
         cmd.append("--no-zone")
 
     if source_type == "webcam" or source == "0":
-        # Check if hardware webcam 0 can actually be opened (it won't exist on cloud/Render)
-        can_open_webcam = False
-        try:
-            test_cap = cv2.VideoCapture(0)
-            can_open_webcam = test_cap.isOpened()
-            test_cap.release()
-        except Exception:
-            can_open_webcam = False
+        # Fast non-blocking check: Linux cloud containers do not have /dev/video0
+        if sys.platform != "win32":
+            can_open_webcam = os.path.exists("/dev/video0")
+        else:
+            try:
+                test_cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                can_open_webcam = test_cap.isOpened()
+                test_cap.release()
+            except Exception:
+                can_open_webcam = False
 
         if can_open_webcam:
             cmd.extend(["--input", "0", "--no-weather-mode"])
@@ -340,10 +343,17 @@ def launch_analytics_stream(
         else:
             cmd.extend(["--input", "0"])
 
+    sub_env = os.environ.copy()
+    sub_env["OMP_NUM_THREADS"] = "1"
+    sub_env["OPENBLAS_NUM_THREADS"] = "1"
+    sub_env["MKL_NUM_THREADS"] = "1"
+    sub_env["PYTHONUNBUFFERED"] = "1"
+
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=sub_env,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
     )
     with STREAM_PROCESSES_LOCK:
