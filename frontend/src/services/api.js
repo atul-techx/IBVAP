@@ -4,11 +4,21 @@
  * Maintains in-memory JWT session token and role authorization headers.
  */
 
-// In browser, using relative path '' routes through Vite reverse proxy on same origin, avoiding CORB and CORS issues
-export const API_BASE = typeof window !== 'undefined' ? '' : 'http://127.0.0.1:8000';
-export const WS_BASE = typeof window !== 'undefined'
-  ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
-  : 'ws://127.0.0.1:8000';
+// In browser, relative path '' routes through Vite reverse proxy on same origin.
+// In production deployments (e.g., Vercel), VITE_API_BASE_URL and VITE_WS_BASE_URL point to the live backend.
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '');
+export const API_BASE = rawApiBase
+  ? (rawApiBase.startsWith('http') ? rawApiBase : `https://${rawApiBase}`)
+  : (typeof window !== 'undefined' ? '' : 'http://127.0.0.1:8000');
+
+const rawWsBase = (import.meta.env.VITE_WS_BASE_URL || '').trim().replace(/\/$/, '');
+export const WS_BASE = rawWsBase
+  ? (rawWsBase.startsWith('ws') ? rawWsBase : `wss://${rawWsBase}`)
+  : (rawApiBase
+      ? (rawApiBase.startsWith('http') ? rawApiBase.replace(/^http/, 'ws') : `wss://${rawApiBase}`)
+      : (typeof window !== 'undefined'
+          ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+          : 'ws://127.0.0.1:8000'));
 
 // In-memory token storage (strictly not stored in localStorage to prevent XSS token theft)
 let _authToken = null;
@@ -323,4 +333,73 @@ export async function deleteVehicle(plateNumber) {
     throw new Error(err.detail || `Failed to delete vehicle '${plateNumber}'`);
   }
   return res.json();
+}
+
+// Bulk Import & Template Exports
+export async function bulkImportWatchlist(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/api/admin/watchlist/bulk-import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Bulk import failed');
+  }
+  return res.json();
+}
+
+export async function downloadWatchlistTemplate(format = 'csv') {
+  const res = await fetch(`${API_BASE}/api/admin/watchlist/template?format=${encodeURIComponent(format)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to download template');
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ibvap_authorized_personnel_template.${format === 'xlsx' ? 'xlsx' : 'csv'}`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
+export async function bulkImportVehicles(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/api/admin/vehicles/bulk-import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Vehicles bulk import failed');
+  }
+  return res.json();
+}
+
+export async function downloadVehiclesTemplate(format = 'csv') {
+  const res = await fetch(`${API_BASE}/api/admin/vehicles/template?format=${encodeURIComponent(format)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to download template');
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ibvap_authorized_vehicles_template.${format === 'xlsx' ? 'xlsx' : 'csv'}`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
 }

@@ -1,0 +1,12 @@
+services:
+  # IBVAP - Unified Single-Link Deployment (Backend + Embedded React Frontend)
+  - type: web
+    name: ibvap
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

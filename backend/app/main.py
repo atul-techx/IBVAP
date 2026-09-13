@@ -70,13 +70,17 @@ try:
     from backend.app.admin_management import (
         add_or_update_authorized_vehicle,
         add_or_update_watchlist_person,
+        bulk_import_authorized_vehicles,
+        bulk_import_watchlist_personnel,
         delete_authorized_vehicle,
         delete_watchlist_person,
+        generate_sample_template,
         get_all_authorized_vehicles,
         get_all_watchlist_personnel,
         get_watchlist_dir,
         get_watchlist_person,
         init_admin_tables,
+        parse_tabular_file,
     )
     from backend.app.replay_service import extract_incident_replay_clip, extract_event_target_crop
 except ImportError:
@@ -103,13 +107,17 @@ except ImportError:
     from admin_management import (
         add_or_update_authorized_vehicle,
         add_or_update_watchlist_person,
+        bulk_import_authorized_vehicles,
+        bulk_import_watchlist_personnel,
         delete_authorized_vehicle,
         delete_watchlist_person,
+        generate_sample_template,
         get_all_authorized_vehicles,
         get_all_watchlist_personnel,
         get_watchlist_dir,
         get_watchlist_person,
         init_admin_tables,
+        parse_tabular_file,
     )
     try:
         from replay_service import extract_incident_replay_clip, extract_event_target_crop
@@ -228,6 +236,47 @@ ACTIVE_STREAM_PROCESSES: dict[str, subprocess.Popen] = {}
 STREAM_PROCESSES_LOCK = threading.Lock()
 
 
+def kill_camera_processes(camera_id: str):
+    """Forcefully and reliably terminate all active & orphaned processes for a camera."""
+    target_pids = set()
+
+    with STREAM_PROCESSES_LOCK:
+        proc = ACTIVE_STREAM_PROCESSES.pop(camera_id, None)
+        if proc:
+            target_pids.add(proc.pid)
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    try:
+        import psutil
+        current_pid = os.getpid()
+        for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if p.info['pid'] == current_pid:
+                    continue
+                cmdline = p.info.get('cmdline') or []
+                cmd_str = " ".join(cmdline)
+                if "detection_tracking.py" in cmd_str and f"--camera-id {camera_id}" in cmd_str:
+                    target_pids.add(p.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        print(f"[!] Warning inspecting processes for kill: {e}")
+
+    for pid in target_pids:
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
+            else:
+                import psutil
+                p = psutil.Process(pid)
+                p.kill()
+        except Exception:
+            pass
+
+
 def launch_analytics_stream(
     camera_id: str = "CAM_01",
     source_type: str = "test_video",
@@ -240,62 +289,54 @@ def launch_analytics_stream(
     script_path = app_dir / "detection_tracking.py"
     test_videos_dir = app_dir.parent / "test_videos"
 
-    with STREAM_PROCESSES_LOCK:
-        existing = ACTIVE_STREAM_PROCESSES.get(camera_id)
-        if existing and existing.poll() is None:
-            try:
-                existing.terminate()
-                existing.wait(timeout=2.0)
-            except Exception:
-                try:
-                    existing.kill()
-                except Exception:
-                    pass
+    # Cleanly terminate any running instance of this camera stream first
+    kill_camera_processes(camera_id)
 
-        cmd = [
-            sys.executable,
-            str(script_path),
-            "--camera-id", camera_id,
-            "--imgsz", str(imgsz),
-            "--no-display",
-        ]
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "--camera-id", camera_id,
+        "--imgsz", str(imgsz),
+        "--no-display",
+    ]
 
-        if not show_zone:
-            cmd.append("--no-zone")
+    if not show_zone:
+        cmd.append("--no-zone")
 
-        if source_type == "webcam" or source == "0":
-            cmd.extend(["--input", "0", "--no-weather-mode"])
+    if source_type == "webcam" or source == "0":
+        cmd.extend(["--input", "0", "--no-weather-mode"])
+    else:
+        video_file = None
+        if source:
+            candidate = test_videos_dir / source
+            if candidate.exists():
+                video_file = candidate
+            elif Path(source).exists():
+                video_file = Path(source)
+        if not video_file:
+            for candidate_name in ["sample.mp4", "tracking_test.mp4", "real_footage_1.mp4"]:
+                c = test_videos_dir / candidate_name
+                if c.exists():
+                    video_file = c
+                    break
+        if video_file:
+            cmd.extend(["--input", str(video_file), "--loop"])
         else:
-            video_file = None
-            if source:
-                candidate = test_videos_dir / source
-                if candidate.exists():
-                    video_file = candidate
-                elif Path(source).exists():
-                    video_file = Path(source)
-            if not video_file:
-                for candidate_name in ["sample.mp4", "tracking_test.mp4", "real_footage_1.mp4"]:
-                    c = test_videos_dir / candidate_name
-                    if c.exists():
-                        video_file = c
-                        break
-            if video_file:
-                cmd.extend(["--input", str(video_file), "--loop"])
-            else:
-                cmd.extend(["--input", "0"])
+            cmd.extend(["--input", "0"])
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
-        )
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+    )
+    with STREAM_PROCESSES_LOCK:
         ACTIVE_STREAM_PROCESSES[camera_id] = proc
-        return proc
+    return proc
 
 
 DEFAULT_CAMERA_FEEDS = {
-    "CAM_01": "sample.mp4",
+    "CAM_01": "0",  # Live Webcam by default for Sector 01
     "CAM_02": "suspicious_behavior_test.mp4",
     "CAM_03": "real_footage_1.mp4",
     "CAM_04": "tracking_test.mp4",
@@ -312,8 +353,10 @@ def ensure_default_stream_running(camera_id: str = "CAM_01"):
         proc = ACTIVE_STREAM_PROCESSES.get(camera_id)
         if proc and proc.poll() is None:
             return proc
-    default_source = DEFAULT_CAMERA_FEEDS.get(camera_id, "sample.mp4")
-    return launch_analytics_stream(camera_id=camera_id, source_type="test_video", source=default_source, imgsz=480)
+    default_source = DEFAULT_CAMERA_FEEDS.get(camera_id, "0" if camera_id == "CAM_01" else "sample.mp4")
+    source_type = "webcam" if default_source == "0" else "test_video"
+    imgsz = 384 if source_type == "webcam" else 480
+    return launch_analytics_stream(camera_id=camera_id, source_type=source_type, source=default_source, imgsz=imgsz)
 
 
 @app.on_event("startup")
@@ -344,8 +387,8 @@ def shutdown_event():
 # =====================================================================
 # REST Endpoints
 # =====================================================================
-@app.get("/")
-def root():
+@app.get("/api")
+def api_root():
     return {
         "project": "IBVAP - Intelligent Border Video Analytics Platform",
         "status": "online",
@@ -558,12 +601,72 @@ def rescan_admin_watchlist(current_user: dict = Depends(require_admin)):
     }
 
 
+@app.post("/api/admin/watchlist/bulk-import")
+async def bulk_import_watchlist(
+    file: UploadFile = File(..., description="CSV or Excel file containing personnel records"),
+    current_user: dict = Depends(require_admin),
+):
+    """Bulk import authorized personnel from CSV or Excel (.xlsx) file (Admin only)."""
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="A valid CSV or Excel file is required.")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in [".csv", ".tsv", ".xlsx", ".xlsm"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Please upload a CSV (.csv) or Excel (.xlsx) file.",
+        )
+
+    try:
+        contents = await file.read()
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        rows = parse_tabular_file(contents, file.filename)
+        if not rows:
+            raise HTTPException(status_code=400, detail="No data records found in uploaded file.")
+
+        result = bulk_import_watchlist_personnel(rows)
+        get_active_face_recognizer(reload=True)
+
+        return {
+            "status": "success",
+            "message": f"Bulk import complete: {result['added']} added, {result['updated']} updated out of {result['total_records']} records.",
+            **result,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process bulk import: {str(e)}")
+
+
+@app.get("/api/admin/watchlist/template")
+def get_watchlist_template(
+    format: str = Query("csv", pattern="^(csv|xlsx)$"),
+    current_user: dict = Depends(require_admin),
+):
+    """Download sample CSV or Excel template for bulk importing authorized personnel (Admin only)."""
+    try:
+        data, media_type, filename = generate_sample_template(target="personnel", format_type=format)
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate template: {str(e)}")
+
+
 @app.get("/api/admin/watchlist/photo/{filename}")
 def get_watchlist_photo(filename: str):
-    """Serve photo thumbnail for admin watchlist management."""
+    """Serve photo thumbnail for admin watchlist management with fallback to default avatar."""
     clean_filename = Path(filename).name
     photo_path = get_watchlist_dir() / clean_filename
-    if not photo_path.exists():
+    if not photo_path.exists() or clean_filename in ("", "none", "default_avatar.png"):
+        default_path = get_watchlist_dir() / "default_avatar.png"
+        if default_path.exists():
+            return FileResponse(path=str(default_path), media_type="image/png")
         raise HTTPException(status_code=404, detail="Photo not found")
     media_type = "image/png" if clean_filename.endswith(".png") else "image/jpeg"
     return FileResponse(path=str(photo_path), media_type=media_type)
@@ -601,6 +704,61 @@ def add_admin_vehicle(req: VehicleCreateRequest, current_user: dict = Depends(re
         "message": f"Vehicle '{clean_plate}' ({req.owner_name}) successfully added to authorized whitelist.",
         "vehicle": vehicle,
     }
+
+
+@app.post("/api/admin/vehicles/bulk-import")
+async def bulk_import_vehicles(
+    file: UploadFile = File(..., description="CSV or Excel file containing vehicle records"),
+    current_user: dict = Depends(require_admin),
+):
+    """Bulk import authorized vehicles from CSV or Excel (.xlsx) file (Admin only)."""
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="A valid CSV or Excel file is required.")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in [".csv", ".tsv", ".xlsx", ".xlsm"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Please upload a CSV (.csv) or Excel (.xlsx) file.",
+        )
+
+    try:
+        contents = await file.read()
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        rows = parse_tabular_file(contents, file.filename)
+        if not rows:
+            raise HTTPException(status_code=400, detail="No data records found in uploaded file.")
+
+        result = bulk_import_authorized_vehicles(rows)
+        return {
+            "status": "success",
+            "message": f"Bulk import complete: {result['added']} added, {result['updated']} updated out of {result['total_records']} records.",
+            **result,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process bulk import: {str(e)}")
+
+
+@app.get("/api/admin/vehicles/template")
+def get_vehicles_template(
+    format: str = Query("csv", pattern="^(csv|xlsx)$"),
+    current_user: dict = Depends(require_admin),
+):
+    """Download sample CSV or Excel template for bulk importing authorized vehicles (Admin only)."""
+    try:
+        data, media_type, filename = generate_sample_template(target="vehicles", format_type=format)
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate template: {str(e)}")
 
 
 @app.delete("/api/admin/vehicles/{plate_number}")
@@ -1165,17 +1323,7 @@ async def stop_camera_stream(
 ):
     """Stop active camera analytics process with 1-click."""
     MANUALLY_STOPPED_CAMERAS.add(camera_id)
-    with STREAM_PROCESSES_LOCK:
-        proc = ACTIVE_STREAM_PROCESSES.pop(camera_id, None)
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=2.0)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+    kill_camera_processes(camera_id)
 
     # Clear cached frames from memory and disk so no stale frames display
     hub = get_frame_hub()
@@ -1183,9 +1331,15 @@ async def stop_camera_stream(
         hub.remove_camera(camera_id)
     backend_dir = Path(__file__).resolve().parent.parent
     live_frame_path = backend_dir / f"live_frame_{camera_id}.jpg"
+    fast_path = get_live_frame_path(camera_id)
     try:
         if live_frame_path.exists():
             live_frame_path.unlink()
+    except Exception:
+        pass
+    try:
+        if fast_path.exists():
+            fast_path.unlink()
     except Exception:
         pass
 
@@ -1288,3 +1442,44 @@ async def websocket_events_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
     except Exception:
         ws_manager.disconnect(websocket)
+
+
+# =====================================================================
+# Production Static SPA Frontend Serving (Single-Link Deployment)
+# =====================================================================
+from fastapi.staticfiles import StaticFiles
+
+frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    audit_images_dir = frontend_dist / "audit_images"
+    if audit_images_dir.exists():
+        app.mount("/audit_images", StaticFiles(directory=str(audit_images_dir)), name="audit_images")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(str(frontend_dist / "index.html"))
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_frontend(full_path: str):
+        if full_path.startswith(("api/", "api", "ws/", "ws", "docs", "openapi.json")):
+            raise HTTPException(status_code=404, detail="Endpoint not found")
+        target_file = frontend_dist / full_path
+        if full_path and target_file.is_file():
+            return FileResponse(str(target_file))
+        return FileResponse(str(frontend_dist / "index.html"))
+else:
+    @app.get("/")
+    def root():
+        return {
+            "project": "IBVAP - Intelligent Border Video Analytics Platform",
+            "status": "online",
+            "phase": "Step 5 - React Command Center Dashboard",
+            "auth_enabled": not is_auth_disabled(),
+            "docs_url": "/docs",
+            "ws_events_url": "/ws/events",
+        }
+

@@ -20,6 +20,11 @@ import {
   Camera,
   Layers,
   Sparkles,
+  FileSpreadsheet,
+  FileUp,
+  Download,
+  UserPlus,
+  FileCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -31,6 +36,10 @@ import {
   fetchVehicles,
   addVehicle,
   deleteVehicle,
+  bulkImportWatchlist,
+  downloadWatchlistTemplate,
+  bulkImportVehicles,
+  downloadVehiclesTemplate,
 } from '../services/api';
 
 export default function AdminPanel() {
@@ -43,7 +52,14 @@ export default function AdminPanel() {
   const [personSearch, setPersonSearch] = useState('');
   const [personStatusFilter, setPersonStatusFilter] = useState('all');
 
-  // Watchlist Form State
+  // Personnel Entry Mode: 'single' | 'bulk'
+  const [personEntryMode, setPersonEntryMode] = useState('single');
+  const [personBulkFile, setPersonBulkFile] = useState(null);
+  const [uploadingPersonBulk, setUploadingPersonBulk] = useState(false);
+  const [personBulkResult, setPersonBulkResult] = useState(null);
+  const personBulkInputRef = useRef(null);
+
+  // Watchlist Form State (Single)
   const [personName, setPersonName] = useState('');
   const [personRole, setPersonRole] = useState('SSB Personnel');
   const [personExpiry, setPersonExpiry] = useState('');
@@ -57,6 +73,13 @@ export default function AdminPanel() {
   const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState('');
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState('all');
+
+  // Vehicle Entry Mode: 'single' | 'bulk'
+  const [vehicleEntryMode, setVehicleEntryMode] = useState('single');
+  const [vehicleBulkFile, setVehicleBulkFile] = useState(null);
+  const [uploadingVehicleBulk, setUploadingVehicleBulk] = useState(false);
+  const [vehicleBulkResult, setVehicleBulkResult] = useState(null);
+  const vehicleBulkInputRef = useRef(null);
 
   // Vehicle Form State
   const [plateNumber, setPlateNumber] = useState('');
@@ -240,6 +263,84 @@ export default function AdminPanel() {
     }
   };
 
+  // Bulk Personnel Import Handlers
+  const handlePersonBulkFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPersonBulkFile(file);
+      setPersonBulkResult(null);
+    }
+  };
+
+  const handleUploadPersonBulk = async () => {
+    if (!personBulkFile) {
+      showNotification('error', 'Please select a CSV or Excel (.xlsx) file to upload.');
+      return;
+    }
+    setUploadingPersonBulk(true);
+    setPersonBulkResult(null);
+    try {
+      const res = await bulkImportWatchlist(personBulkFile);
+      setPersonBulkResult(res);
+      showNotification('success', res.message || `Bulk import complete: ${res.added} added, ${res.updated} updated.`);
+      await loadWatchlistData();
+      if (personBulkInputRef.current) personBulkInputRef.current.value = '';
+      setPersonBulkFile(null);
+    } catch (err) {
+      showNotification('error', err.message || 'Failed to process bulk import');
+    } finally {
+      setUploadingPersonBulk(false);
+    }
+  };
+
+  const handleDownloadPersonTemplate = async (format) => {
+    try {
+      await downloadWatchlistTemplate(format);
+      showNotification('success', `Downloaded ${format.toUpperCase()} template`);
+    } catch (err) {
+      showNotification('error', err.message || `Failed to download ${format.toUpperCase()} template`);
+    }
+  };
+
+  // Bulk Vehicle Import Handlers
+  const handleVehicleBulkFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setVehicleBulkFile(file);
+      setVehicleBulkResult(null);
+    }
+  };
+
+  const handleUploadVehicleBulk = async () => {
+    if (!vehicleBulkFile) {
+      showNotification('error', 'Please select a CSV or Excel (.xlsx) file to upload.');
+      return;
+    }
+    setUploadingVehicleBulk(true);
+    setVehicleBulkResult(null);
+    try {
+      const res = await bulkImportVehicles(vehicleBulkFile);
+      setVehicleBulkResult(res);
+      showNotification('success', res.message || `Bulk import complete: ${res.added} added, ${res.updated} updated.`);
+      await loadVehicleData();
+      if (vehicleBulkInputRef.current) vehicleBulkInputRef.current.value = '';
+      setVehicleBulkFile(null);
+    } catch (err) {
+      showNotification('error', err.message || 'Failed to process bulk import');
+    } finally {
+      setUploadingVehicleBulk(false);
+    }
+  };
+
+  const handleDownloadVehicleTemplate = async (format) => {
+    try {
+      await downloadVehiclesTemplate(format);
+      showNotification('success', `Downloaded ${format.toUpperCase()} template`);
+    } catch (err) {
+      showNotification('error', err.message || `Failed to download ${format.toUpperCase()} template`);
+    }
+  };
+
   // Watchlist Rescan Trigger
   const handleRescanWatchlist = async () => {
     setIsRescanning(true);
@@ -381,119 +482,291 @@ export default function AdminPanel() {
       {activeTab === 'personnel' && (
         <div className="admin-tab-content">
           <div className="admin-grid-layout">
-            {/* Form Column: Add New Profile */}
+            {/* Form Column: Add New Profile / Bulk Import */}
             <div className="admin-form-card">
               <div className="card-header-line">
                 <div className="card-title-group">
-                  <Plus size={18} className="icon-cyan" />
-                  <h3>Register Authorized Personnel</h3>
+                  {personEntryMode === 'single' ? (
+                    <Plus size={18} className="icon-cyan" />
+                  ) : (
+                    <FileSpreadsheet size={18} className="icon-cyan" />
+                  )}
+                  <h3>
+                    {personEntryMode === 'single'
+                      ? 'Register Authorized Personnel'
+                      : 'Bulk Import Personnel (CSV / Excel)'}
+                  </h3>
                 </div>
-                <span className="card-tag">Biometric Profile</span>
+                <span className="card-tag">
+                  {personEntryMode === 'single' ? 'Biometric Profile' : 'Batch Ingestion'}
+                </span>
               </div>
-              <p className="card-desc">
-                Upload a portrait image to extract a 128-d SFace embedding for facial recognition.
-              </p>
 
-              <form onSubmit={handleSavePerson} className="admin-entry-form">
-                {/* Photo Upload Zone */}
-                <div className="form-group">
-                  <label className="form-label">Reference Portrait Photo *</label>
+              {/* Mode Switcher */}
+              <div className="entry-mode-switch">
+                <button
+                  type="button"
+                  className={`mode-pill-btn ${personEntryMode === 'single' ? 'active' : ''}`}
+                  onClick={() => setPersonEntryMode('single')}
+                >
+                  <UserPlus size={14} />
+                  <span>Single Entry (1-to-1)</span>
+                </button>
+                <button
+                  type="button"
+                  className={`mode-pill-btn ${personEntryMode === 'bulk' ? 'active' : ''}`}
+                  onClick={() => setPersonEntryMode('bulk')}
+                >
+                  <FileSpreadsheet size={14} />
+                  <span>Bulk Import (CSV / Excel)</span>
+                </button>
+              </div>
+
+              {personEntryMode === 'single' ? (
+                <>
+                  <p className="card-desc">
+                    Upload a portrait image to extract a 128-d SFace embedding for facial recognition.
+                  </p>
+
+                  <form onSubmit={handleSavePerson} className="admin-entry-form">
+                    {/* Photo Upload Zone */}
+                    <div className="form-group">
+                      <label className="form-label">Reference Portrait Photo *</label>
+                      <div
+                        className={`photo-drop-zone ${personPhotoPreview ? 'has-preview' : ''}`}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handlePhotoChange}
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          style={{ display: 'none' }}
+                        />
+                        {personPhotoPreview ? (
+                          <div className="preview-container">
+                            <img src={personPhotoPreview} alt="Preview" className="photo-preview-img" />
+                            <div className="preview-overlay">
+                              <Camera size={18} />
+                              <span>Change Photo</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="drop-prompt">
+                            <Upload size={28} className="drop-icon" />
+                            <span className="drop-title">Click to upload portrait</span>
+                            <span className="drop-sub">PNG, JPG, or WEBP (Clear frontal face)</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Full Name *</label>
+                      <input
+                        type="text"
+                        className="admin-text-input"
+                        placeholder="e.g. Capt. Kunal Singh"
+                        value={personName}
+                        onChange={(e) => setPersonName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group flex-1">
+                        <label className="form-label">Role / Category</label>
+                        <select
+                          className="admin-select-input"
+                          value={personRole}
+                          onChange={(e) => setPersonRole(e.target.value)}
+                        >
+                          <option value="SSB Personnel">SSB Personnel</option>
+                          <option value="Border Patrol Officer">Border Patrol Officer</option>
+                          <option value="Command Staff">Command Staff</option>
+                          <option value="Surveillance Operator">Surveillance Operator</option>
+                          <option value="Contractor">Contractor</option>
+                          <option value="Visitor">Visitor</option>
+                          <option value="Medical Officer">Medical Officer</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group flex-1">
+                        <label className="form-label">
+                          Expiry Date
+                          <span className="label-sub">(Optional)</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="admin-date-input"
+                          value={personExpiry}
+                          onChange={(e) => setPersonExpiry(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">
+                        Operational Notes
+                        <span className="label-sub">(Optional)</span>
+                      </label>
+                      <textarea
+                        className="admin-textarea"
+                        rows={2}
+                        placeholder="e.g. Sector 4 QRT Leader, Gate Pass #B-88"
+                        value={personNotes}
+                        onChange={(e) => setPersonNotes(e.target.value)}
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="admin-submit-btn"
+                      disabled={savingPerson}
+                    >
+                      <ShieldCheck size={16} />
+                      <span>{savingPerson ? 'Saving & Generating Embeddings...' : 'Save Watchlist Profile'}</span>
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <div className="bulk-import-container">
+                  <p className="card-desc">
+                    Import multiple authorized personnel profiles at once using a CSV (.csv) or Microsoft Excel (.xlsx) file.
+                  </p>
+
+                  {/* Sample Template Downloads */}
+                  <div className="template-download-card">
+                    <div className="template-info">
+                      <FileCheck size={16} className="icon-cyan" />
+                      <div>
+                        <div className="template-title">Official Personnel Spreadsheet Templates</div>
+                        <div className="template-sub">Download formatted template to populate records:</div>
+                      </div>
+                    </div>
+                    <div className="template-btn-row">
+                      <button
+                        type="button"
+                        className="template-dl-btn"
+                        onClick={() => handleDownloadPersonTemplate('csv')}
+                        title="Download CSV spreadsheet template"
+                      >
+                        <Download size={13} />
+                        <span>Download CSV Template</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="template-dl-btn excel"
+                        onClick={() => handleDownloadPersonTemplate('xlsx')}
+                        title="Download Excel spreadsheet template (.xlsx)"
+                      >
+                        <FileSpreadsheet size={13} />
+                        <span>Download Excel Template (.xlsx)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dropzone for Bulk File */}
                   <div
-                    className={`photo-drop-zone ${personPhotoPreview ? 'has-preview' : ''}`}
-                    onClick={() => fileInputRef.current?.click()}
+                    className={`bulk-drop-zone ${personBulkFile ? 'has-file' : ''}`}
+                    onClick={() => personBulkInputRef.current?.click()}
                   >
                     <input
                       type="file"
-                      ref={fileInputRef}
-                      onChange={handlePhotoChange}
-                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      ref={personBulkInputRef}
+                      onChange={handlePersonBulkFileChange}
+                      accept=".csv, .tsv, .xlsx, .xlsm, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       style={{ display: 'none' }}
                     />
-                    {personPhotoPreview ? (
-                      <div className="preview-container">
-                        <img src={personPhotoPreview} alt="Preview" className="photo-preview-img" />
-                        <div className="preview-overlay">
-                          <Camera size={18} />
-                          <span>Change Photo</span>
+                    {personBulkFile ? (
+                      <div className="file-selected-view">
+                        <FileSpreadsheet size={32} className="file-icon-pulse" />
+                        <div className="file-details">
+                          <span className="file-name">{personBulkFile.name}</span>
+                          <span className="file-meta">
+                            {(personBulkFile.size / 1024).toFixed(1)} KB • Ready to upload & process
+                          </span>
                         </div>
+                        <button
+                          type="button"
+                          className="file-remove-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPersonBulkFile(null);
+                            if (personBulkInputRef.current) personBulkInputRef.current.value = '';
+                          }}
+                          title="Remove file"
+                        >
+                          <X size={15} />
+                        </button>
                       </div>
                     ) : (
                       <div className="drop-prompt">
-                        <Upload size={28} className="drop-icon" />
-                        <span className="drop-title">Click to upload portrait</span>
-                        <span className="drop-sub">PNG, JPG, or WEBP (Clear frontal face)</span>
+                        <FileUp size={28} className="drop-icon icon-cyan" />
+                        <span className="drop-title">Select or Drag CSV / Excel File</span>
+                        <span className="drop-sub">Supported formats: .CSV, .XLSX, .XLSM</span>
                       </div>
                     )}
                   </div>
-                </div>
 
-                <div className="form-group">
-                  <label className="form-label">Full Name *</label>
-                  <input
-                    type="text"
-                    className="admin-text-input"
-                    placeholder="e.g. Capt. Kunal Singh"
-                    value={personName}
-                    onChange={(e) => setPersonName(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group flex-1">
-                    <label className="form-label">Role / Category</label>
-                    <select
-                      className="admin-select-input"
-                      value={personRole}
-                      onChange={(e) => setPersonRole(e.target.value)}
-                    >
-                      <option value="SSB Personnel">SSB Personnel</option>
-                      <option value="Border Patrol Officer">Border Patrol Officer</option>
-                      <option value="Command Staff">Command Staff</option>
-                      <option value="Surveillance Operator">Surveillance Operator</option>
-                      <option value="Contractor">Contractor</option>
-                      <option value="Visitor">Visitor</option>
-                      <option value="Medical Officer">Medical Officer</option>
-                    </select>
+                  {/* Header Columns Guide */}
+                  <div className="bulk-fields-guide">
+                    <span className="guide-label">Supported Columns:</span>
+                    <div className="guide-tags">
+                      <span className="guide-tag required">Full Name *</span>
+                      <span className="guide-tag">Role / Unit</span>
+                      <span className="guide-tag">Expiry Date</span>
+                      <span className="guide-tag">Operational Notes</span>
+                      <span className="guide-tag">Photo Filename</span>
+                    </div>
                   </div>
 
-                  <div className="form-group flex-1">
-                    <label className="form-label">
-                      Expiry Date
-                      <span className="label-sub">(Optional)</span>
-                    </label>
-                    <input
-                      type="date"
-                      className="admin-date-input"
-                      value={personExpiry}
-                      onChange={(e) => setPersonExpiry(e.target.value)}
-                    />
-                  </div>
-                </div>
+                  {/* Bulk Action Submit Button */}
+                  <button
+                    type="button"
+                    className="admin-submit-btn bulk-submit"
+                    onClick={handleUploadPersonBulk}
+                    disabled={!personBulkFile || uploadingPersonBulk}
+                  >
+                    <Upload size={16} />
+                    <span>{uploadingPersonBulk ? 'Importing Records...' : 'Import Personnel Records'}</span>
+                  </button>
 
-                <div className="form-group">
-                  <label className="form-label">
-                    Operational Notes
-                    <span className="label-sub">(Optional)</span>
-                  </label>
-                  <textarea
-                    className="admin-textarea"
-                    rows={2}
-                    placeholder="e.g. Sector 4 QRT Leader, Gate Pass #B-88"
-                    value={personNotes}
-                    onChange={(e) => setPersonNotes(e.target.value)}
-                  />
+                  {/* Result Box */}
+                  {personBulkResult && (
+                    <div className="bulk-result-card">
+                      <div className="result-header">
+                        <CheckCircle2 size={16} style={{ color: '#34d399' }} />
+                        <span>Bulk Import Outcome</span>
+                      </div>
+                      <div className="result-stats-row">
+                        <div className="stat-pill total">
+                          <span>Total:</span> <strong>{personBulkResult.total_records}</strong>
+                        </div>
+                        <div className="stat-pill added">
+                          <span>Added:</span> <strong>+{personBulkResult.added}</strong>
+                        </div>
+                        <div className="stat-pill updated">
+                          <span>Updated:</span> <strong>{personBulkResult.updated}</strong>
+                        </div>
+                      </div>
+                      {personBulkResult.errors && personBulkResult.errors.length > 0 && (
+                        <div className="result-errors-box">
+                          <div className="error-title">
+                            <AlertTriangle size={13} />
+                            <span>Warnings ({personBulkResult.errors.length}):</span>
+                          </div>
+                          <ul className="error-list">
+                            {personBulkResult.errors.map((err, i) => (
+                              <li key={i}>{err}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-
-                <button
-                  type="submit"
-                  className="admin-submit-btn"
-                  disabled={savingPerson}
-                >
-                  <ShieldCheck size={16} />
-                  <span>{savingPerson ? 'Saving & Generating Embeddings...' : 'Save Watchlist Profile'}</span>
-                </button>
-              </form>
+              )}
             </div>
 
             {/* List Column: Active Profiles Table */}
@@ -621,111 +894,284 @@ export default function AdminPanel() {
       {activeTab === 'vehicles' && (
         <div className="admin-tab-content">
           <div className="admin-grid-layout">
-            {/* Form Column: Add New Vehicle */}
+            {/* Form Column: Add New Vehicle / Bulk Import */}
             <div className="admin-form-card">
               <div className="card-header-line">
                 <div className="card-title-group">
-                  <Plus size={18} className="icon-cyan" />
-                  <h3>Authorize Vehicle (ANPR)</h3>
+                  {vehicleEntryMode === 'single' ? (
+                    <Plus size={18} className="icon-cyan" />
+                  ) : (
+                    <FileSpreadsheet size={18} className="icon-cyan" />
+                  )}
+                  <h3>
+                    {vehicleEntryMode === 'single'
+                      ? 'Authorize Vehicle (ANPR)'
+                      : 'Bulk Import Vehicles (CSV / Excel)'}
+                  </h3>
                 </div>
-                <span className="card-tag">Plate Whitelist</span>
+                <span className="card-tag">
+                  {vehicleEntryMode === 'single' ? 'Plate Whitelist' : 'Batch Ingestion'}
+                </span>
               </div>
-              <p className="card-desc">
-                Register authorized vehicle plate numbers. Matching ANPR detections will be categorized as routine low-severity access.
-              </p>
 
-              <form onSubmit={handleSaveVehicle} className="admin-entry-form">
-                <div className="form-group">
-                  <label className="form-label">License Plate Number *</label>
-                  <input
-                    type="text"
-                    className="admin-text-input plate-input"
-                    placeholder="e.g. DL 01 AB 1234"
-                    value={plateNumber}
-                    onChange={(e) => setPlateNumber(e.target.value.toUpperCase())}
-                    required
-                  />
-                  <div className="input-hint">Spaces and hyphens are automatically normalized for ANPR matching.</div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Owner / Designated Unit *</label>
-                  <input
-                    type="text"
-                    className="admin-text-input"
-                    placeholder="e.g. Capt. Rajesh Kumar / Supply Unit 4"
-                    value={ownerName}
-                    onChange={(e) => setOwnerName(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group flex-1">
-                    <label className="form-label">Vehicle Type</label>
-                    <select
-                      className="admin-select-input"
-                      value={vehicleType}
-                      onChange={(e) => setVehicleType(e.target.value)}
-                    >
-                      <option value="Patrol Jeep">Patrol Jeep</option>
-                      <option value="Supply Truck">Supply Truck</option>
-                      <option value="Medical Ambulance">Medical Ambulance</option>
-                      <option value="Staff Car">Staff Car</option>
-                      <option value="QRT Interceptor">QRT Interceptor</option>
-                      <option value="Armored Carrier">Armored Carrier</option>
-                      <option value="Commercial Delivery">Commercial Delivery</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group flex-1">
-                    <label className="form-label">
-                      Expiry Date
-                      <span className="label-sub">(Optional)</span>
-                    </label>
-                    <input
-                      type="date"
-                      className="admin-date-input"
-                      value={vehicleExpiry}
-                      onChange={(e) => setVehicleExpiry(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Operational Purpose</label>
-                  <input
-                    type="text"
-                    className="admin-text-input"
-                    placeholder="e.g. Sector 4 Perimeter Patrol"
-                    value={purpose}
-                    onChange={(e) => setPurpose(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">
-                    Operational Notes
-                    <span className="label-sub">(Optional)</span>
-                  </label>
-                  <textarea
-                    className="admin-textarea"
-                    rows={2}
-                    placeholder="e.g. Command Escort Unit, 24/7 Clearance"
-                    value={vehicleNotes}
-                    onChange={(e) => setVehicleNotes(e.target.value)}
-                  />
-                </div>
-
+              {/* Mode Switcher */}
+              <div className="entry-mode-switch">
                 <button
-                  type="submit"
-                  className="admin-submit-btn"
-                  disabled={savingVehicle}
+                  type="button"
+                  className={`mode-pill-btn ${vehicleEntryMode === 'single' ? 'active' : ''}`}
+                  onClick={() => setVehicleEntryMode('single')}
                 >
-                  <Car size={16} />
-                  <span>{savingVehicle ? 'Saving Vehicle...' : 'Add Vehicle to Whitelist'}</span>
+                  <Car size={14} />
+                  <span>Single Entry (1-to-1)</span>
                 </button>
-              </form>
+                <button
+                  type="button"
+                  className={`mode-pill-btn ${vehicleEntryMode === 'bulk' ? 'active' : ''}`}
+                  onClick={() => setVehicleEntryMode('bulk')}
+                >
+                  <FileSpreadsheet size={14} />
+                  <span>Bulk Import (CSV / Excel)</span>
+                </button>
+              </div>
+
+              {vehicleEntryMode === 'single' ? (
+                <>
+                  <p className="card-desc">
+                    Register authorized vehicle plate numbers. Matching ANPR detections will be categorized as routine low-severity access.
+                  </p>
+
+                  <form onSubmit={handleSaveVehicle} className="admin-entry-form">
+                    <div className="form-group">
+                      <label className="form-label">License Plate Number *</label>
+                      <input
+                        type="text"
+                        className="admin-text-input plate-input"
+                        placeholder="e.g. DL 01 AB 1234"
+                        value={plateNumber}
+                        onChange={(e) => setPlateNumber(e.target.value.toUpperCase())}
+                        required
+                      />
+                      <div className="input-hint">Spaces and hyphens are automatically normalized for ANPR matching.</div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Owner / Designated Unit *</label>
+                      <input
+                        type="text"
+                        className="admin-text-input"
+                        placeholder="e.g. Capt. Rajesh Kumar / Supply Unit 4"
+                        value={ownerName}
+                        onChange={(e) => setOwnerName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group flex-1">
+                        <label className="form-label">Vehicle Type</label>
+                        <select
+                          className="admin-select-input"
+                          value={vehicleType}
+                          onChange={(e) => setVehicleType(e.target.value)}
+                        >
+                          <option value="Patrol Jeep">Patrol Jeep</option>
+                          <option value="Supply Truck">Supply Truck</option>
+                          <option value="Medical Ambulance">Medical Ambulance</option>
+                          <option value="Staff Car">Staff Car</option>
+                          <option value="QRT Interceptor">QRT Interceptor</option>
+                          <option value="Armored Carrier">Armored Carrier</option>
+                          <option value="Commercial Delivery">Commercial Delivery</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group flex-1">
+                        <label className="form-label">
+                          Expiry Date
+                          <span className="label-sub">(Optional)</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="admin-date-input"
+                          value={vehicleExpiry}
+                          onChange={(e) => setVehicleExpiry(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Operational Purpose</label>
+                      <input
+                        type="text"
+                        className="admin-text-input"
+                        placeholder="e.g. Sector 4 Perimeter Patrol"
+                        value={purpose}
+                        onChange={(e) => setPurpose(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">
+                        Operational Notes
+                        <span className="label-sub">(Optional)</span>
+                      </label>
+                      <textarea
+                        className="admin-textarea"
+                        rows={2}
+                        placeholder="e.g. Command Escort Unit, 24/7 Clearance"
+                        value={vehicleNotes}
+                        onChange={(e) => setVehicleNotes(e.target.value)}
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="admin-submit-btn"
+                      disabled={savingVehicle}
+                    >
+                      <Car size={16} />
+                      <span>{savingVehicle ? 'Saving Vehicle...' : 'Add Vehicle to Whitelist'}</span>
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <div className="bulk-import-container">
+                  <p className="card-desc">
+                    Batch upload multiple authorized vehicle plate records using a CSV (.csv) or Microsoft Excel (.xlsx) file.
+                  </p>
+
+                  {/* Sample Template Downloads */}
+                  <div className="template-download-card">
+                    <div className="template-info">
+                      <FileCheck size={16} className="icon-cyan" />
+                      <div>
+                        <div className="template-title">Official Vehicle Whitelist Templates</div>
+                        <div className="template-sub">Download formatted template to populate vehicle records:</div>
+                      </div>
+                    </div>
+                    <div className="template-btn-row">
+                      <button
+                        type="button"
+                        className="template-dl-btn"
+                        onClick={() => handleDownloadVehicleTemplate('csv')}
+                        title="Download CSV vehicle template"
+                      >
+                        <Download size={13} />
+                        <span>Download CSV Template</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="template-dl-btn excel"
+                        onClick={() => handleDownloadVehicleTemplate('xlsx')}
+                        title="Download Excel vehicle template (.xlsx)"
+                      >
+                        <FileSpreadsheet size={13} />
+                        <span>Download Excel Template (.xlsx)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dropzone for Bulk File */}
+                  <div
+                    className={`bulk-drop-zone ${vehicleBulkFile ? 'has-file' : ''}`}
+                    onClick={() => vehicleBulkInputRef.current?.click()}
+                  >
+                    <input
+                      type="file"
+                      ref={vehicleBulkInputRef}
+                      onChange={handleVehicleBulkFileChange}
+                      accept=".csv, .tsv, .xlsx, .xlsm, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      style={{ display: 'none' }}
+                    />
+                    {vehicleBulkFile ? (
+                      <div className="file-selected-view">
+                        <FileSpreadsheet size={32} className="file-icon-pulse" />
+                        <div className="file-details">
+                          <span className="file-name">{vehicleBulkFile.name}</span>
+                          <span className="file-meta">
+                            {(vehicleBulkFile.size / 1024).toFixed(1)} KB • Ready to upload & process
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="file-remove-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVehicleBulkFile(null);
+                            if (vehicleBulkInputRef.current) vehicleBulkInputRef.current.value = '';
+                          }}
+                          title="Remove file"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="drop-prompt">
+                        <FileUp size={28} className="drop-icon icon-cyan" />
+                        <span className="drop-title">Select or Drag CSV / Excel File</span>
+                        <span className="drop-sub">Supported formats: .CSV, .XLSX, .XLSM</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Header Columns Guide */}
+                  <div className="bulk-fields-guide">
+                    <span className="guide-label">Supported Columns:</span>
+                    <div className="guide-tags">
+                      <span className="guide-tag required">Plate Number *</span>
+                      <span className="guide-tag required">Owner Name *</span>
+                      <span className="guide-tag">Vehicle Type</span>
+                      <span className="guide-tag">Purpose</span>
+                      <span className="guide-tag">Expiry Date</span>
+                      <span className="guide-tag">Operational Notes</span>
+                    </div>
+                  </div>
+
+                  {/* Bulk Action Submit Button */}
+                  <button
+                    type="button"
+                    className="admin-submit-btn bulk-submit"
+                    onClick={handleUploadVehicleBulk}
+                    disabled={!vehicleBulkFile || uploadingVehicleBulk}
+                  >
+                    <Upload size={16} />
+                    <span>{uploadingVehicleBulk ? 'Importing Vehicles...' : 'Import Vehicle Records'}</span>
+                  </button>
+
+                  {/* Result Box */}
+                  {vehicleBulkResult && (
+                    <div className="bulk-result-card">
+                      <div className="result-header">
+                        <CheckCircle2 size={16} style={{ color: '#34d399' }} />
+                        <span>Bulk Import Outcome</span>
+                      </div>
+                      <div className="result-stats-row">
+                        <div className="stat-pill total">
+                          <span>Total:</span> <strong>{vehicleBulkResult.total_records}</strong>
+                        </div>
+                        <div className="stat-pill added">
+                          <span>Added:</span> <strong>+{vehicleBulkResult.added}</strong>
+                        </div>
+                        <div className="stat-pill updated">
+                          <span>Updated:</span> <strong>{vehicleBulkResult.updated}</strong>
+                        </div>
+                      </div>
+                      {vehicleBulkResult.errors && vehicleBulkResult.errors.length > 0 && (
+                        <div className="result-errors-box">
+                          <div className="error-title">
+                            <AlertTriangle size={13} />
+                            <span>Warnings ({vehicleBulkResult.errors.length}):</span>
+                          </div>
+                          <ul className="error-list">
+                            {vehicleBulkResult.errors.map((err, i) => (
+                              <li key={i}>{err}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* List Column: Active Vehicles Table */}

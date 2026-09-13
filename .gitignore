@@ -9,13 +9,14 @@ venv/
 ENV/
 env/
 *.egg-info/
-dist/
+# dist/ is allowed for frontend/dist
+!frontend/dist/**
 build/
 
 # Node & Frontend
 node_modules/
 frontend/node_modules/
-frontend/dist/
+# frontend/dist is included for unified single-link cloud deployment
 .npm
 .eslintcache
 

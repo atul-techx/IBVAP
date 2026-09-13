@@ -47,7 +47,7 @@ export default function LiveVideoFeed({
   const [isControllingStream, setIsControllingStream] = useState(false);
   const [streamMode, setStreamMode] = useState('mjpeg'); // 'mjpeg' | 'fallback_frame'
   const [showZone, setShowZone] = useState(true);
-  const [activeSourceType, setActiveSourceType] = useState('test_video');
+  const [activeSourceType, setActiveSourceType] = useState('webcam');
   const [manuallyStopped, setManuallyStopped] = useState(false);
   const videoContainerRef = useRef(null);
   const fallbackIntervalRef = useRef(null);
@@ -145,12 +145,16 @@ export default function LiveVideoFeed({
     setIsLoaded(false);
     setStreamMode('mjpeg');
     try {
-      await startStream(cameraId, {
+      const res = await startStream(cameraId, {
         source: videoFilename,
         sourceType: 'test_video',
         imgsz: 480,
         showZone: showZone,
       });
+      setStreamProcesses((prev) => ({
+        ...prev,
+        [cameraId]: { running: true, pid: res?.pid || null },
+      }));
       // Short delay for pipeline initialization then refresh stream key
       setTimeout(() => {
         setStreamKey(Date.now());
@@ -171,12 +175,16 @@ export default function LiveVideoFeed({
     setIsLoaded(false);
     setStreamMode('mjpeg');
     try {
-      await startStream(cameraId, {
+      const res = await startStream(cameraId, {
         source: '0',
         sourceType: 'webcam',
         imgsz: 384,
         showZone: showZone,
       });
+      setStreamProcesses((prev) => ({
+        ...prev,
+        [cameraId]: { running: true, pid: res?.pid || null },
+      }));
       setTimeout(() => {
         setStreamKey(Date.now());
       }, 1200);
@@ -187,6 +195,19 @@ export default function LiveVideoFeed({
     }
   };
 
+  // Auto-start Live Camera on initial system launch
+  useEffect(() => {
+    if (cameraId === 'CAM_01' && !manuallyStopped) {
+      fetchStreamStatus()
+        .then((status) => {
+          if (!status?.CAM_01?.running) {
+            handleStartWebcam();
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   // Toggle Virtual Fence Zone (Blue Box) ON / OFF
   const handleToggleZone = async () => {
     const nextZone = !showZone;
@@ -194,21 +215,26 @@ export default function LiveVideoFeed({
     setManuallyStopped(false);
     setIsControllingStream(true);
     try {
+      let res;
       if (activeSourceType === 'webcam') {
-        await startStream(cameraId, {
+        res = await startStream(cameraId, {
           source: '0',
           sourceType: 'webcam',
           imgsz: 384,
           showZone: nextZone,
         });
       } else {
-        await startStream(cameraId, {
+        res = await startStream(cameraId, {
           source: selectedVideo,
           sourceType: 'test_video',
           imgsz: 480,
           showZone: nextZone,
         });
       }
+      setStreamProcesses((prev) => ({
+        ...prev,
+        [cameraId]: { running: true, pid: res?.pid || null },
+      }));
       setTimeout(() => {
         setStreamKey(Date.now());
       }, 900);
@@ -236,12 +262,26 @@ export default function LiveVideoFeed({
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setManuallyStopped(false);
     setHasError(false);
     setIsLoaded(false);
     setStreamMode('mjpeg');
     setStreamKey(Date.now());
+    try {
+      const res = await startStream(cameraId, {
+        source: activeSourceType === 'webcam' ? '0' : selectedVideo,
+        sourceType: activeSourceType,
+        imgsz: activeSourceType === 'webcam' ? 384 : 480,
+        showZone: showZone,
+      });
+      setStreamProcesses((prev) => ({
+        ...prev,
+        [cameraId]: { running: true, pid: res?.pid || null },
+      }));
+    } catch (err) {
+      console.warn('Failed to refresh stream:', err);
+    }
   };
 
   const toggleFullscreen = () => {
@@ -460,7 +500,7 @@ export default function LiveVideoFeed({
           </button>
 
           {/* Stop Stream Button */}
-          {!manuallyStopped && (isProcessRunning || isCamOnline) && (
+          {!manuallyStopped && (
             <button
               className="icon-btn"
               onClick={handleStopStream}

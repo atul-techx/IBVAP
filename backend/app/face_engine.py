@@ -26,32 +26,33 @@ except ImportError:
 
 def enhance_face_illumination(crop: np.ndarray) -> np.ndarray:
     """
-    Adaptive Face Illumination Normalization (AFIN):
-    Combines Gaussian shadow denoising, dynamic gamma expansion, and LAB-space CLAHE
-    to restore facial landmark fidelity and feature contrast under low-light, dim shadows,
-    or backlit surveillance conditions.
+    Adaptive Face Illumination Normalization (AFIN) for Night / Low-Light & Backlit Scenes:
+    - Preserves sharp facial edges (eyes, nose contour, lips) using bilateral filtering instead of blur
+    - Expands dark shadow details adaptively based on ambient darkness (gamma correction)
+    - Applies localized CLAHE in LAB space with conservative grid sizes (4, 4) to prevent noise amplification
     """
     if crop is None or crop.size == 0:
         return crop
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     mean_luma = float(np.mean(gray))
-    if mean_luma >= 130.0:
+    if mean_luma >= 140.0:
         return crop
 
-    # 1. Denoise low-light sensor grain
-    denoised = cv2.GaussianBlur(crop, (3, 3), 0.8)
+    # 1. Edge-preserving bilateral filter to remove sensor noise without smearing facial features
+    denoised = cv2.bilateralFilter(crop, d=5, sigmaColor=35, sigmaSpace=35)
 
-    # 2. Adaptive Gamma correction based on ambient darkness
-    gamma = float(np.clip(0.40 + 0.60 * (mean_luma / 130.0), 0.35, 0.90))
+    # 2. Adaptive Gamma expansion for low-light & backlit shadows
+    gamma = float(np.clip(0.38 + 0.60 * (mean_luma / 140.0), 0.35, 0.92))
     lut = np.array([((i / 255.0) ** gamma) * 255 for i in range(256)]).astype(np.uint8)
     gamma_corrected = cv2.LUT(denoised, lut)
 
     # 3. Dynamic multi-grid CLAHE in LAB color space
     lab = cv2.cvtColor(gamma_corrected, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clip_limit = float(np.clip(2.5 + 2.0 * (1.0 - mean_luma / 130.0), 2.0, 4.5))
-    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+    clip_limit = float(np.clip(2.0 + 1.8 * (1.0 - mean_luma / 140.0), 1.8, 4.0))
+    grid_sz = (4, 4) if min(crop.shape[:2]) < 80 else (6, 6)
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=grid_sz)
     l_clahe = clahe.apply(l)
 
     # 4. Reconstruct BGR
@@ -103,7 +104,7 @@ class WatchlistFaceRecognizer:
                 str(yunet_path),
                 "",
                 (320, 320),
-                score_threshold=0.45,
+                score_threshold=0.32,
                 nms_threshold=0.3,
                 top_k=5000,
             )
@@ -129,9 +130,11 @@ class WatchlistFaceRecognizer:
         if not self.detector or not self.recognizer:
             return
 
-        valid_exts = [".jpg", ".jpeg", ".png"]
+        valid_exts = [".jpg", ".jpeg", ".png", ".webp"]
         for p in sorted(self.watchlist_dir.iterdir()):
             if p.suffix.lower() in valid_exts:
+                if p.stem.lower().startswith(("default", "placeholder", "avatar")):
+                    continue
                 name = p.stem.replace("_", " ").strip().title()
                 img = cv2.imread(str(p))
                 if img is None:
@@ -177,6 +180,10 @@ class WatchlistFaceRecognizer:
         if ch < 20 or cw < 20:
             return None, 0.0, None
 
+        gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        crop_mean_luma = float(np.mean(gray_crop))
+        is_low_light = (crop_mean_luma < 95.0)
+
         # Apply Adaptive Face Illumination Normalization (AFIN) for low-light & shadows
         crop_enh = enhance_face_illumination(crop)
 
@@ -194,23 +201,23 @@ class WatchlistFaceRecognizer:
 
             best_face = max(faces, key=lambda f: f[14])
             det_score = float(best_face[14])
-            if det_score < 0.40:
+            if det_score < 0.28:
                 return None, 0.0, None
 
             fx, fy, fw, fh = float(best_face[0]), float(best_face[1]), float(best_face[2]), float(best_face[3])
-            if fw < 20.0 or fh < 20.0:
+            if fw < 18.0 or fh < 18.0:
                 return None, 0.0, None
 
             # Check facial aspect ratio to eliminate false profile/background patches
             aspect_ratio = fw / max(1.0, fh)
-            if aspect_ratio < 0.50 or aspect_ratio > 1.65:
+            if aspect_ratio < 0.45 or aspect_ratio > 1.75:
                 return None, 0.0, None
 
             # Verify facial landmark distance (eyes must be distinctly separated)
             x_re, y_re = float(best_face[4]), float(best_face[5])
             x_le, y_le = float(best_face[6]), float(best_face[7])
             eye_dist = ((x_le - x_re) ** 2 + (y_le - y_re) ** 2) ** 0.5
-            if eye_dist < 8.0:
+            if eye_dist < 6.0:
                 return None, 0.0, None
 
             abs_fx1 = round(float(x1 + max(0, fx)), 1)
@@ -222,30 +229,53 @@ class WatchlistFaceRecognizer:
             if not self.recognizer or not self.watchlist_embeddings:
                 return "UNKNOWN", 0.0, face_coords
 
-            aligned = self.recognizer.alignCrop(crop_to_use, best_face)
-            feat = self.recognizer.feature(aligned)
+            # Dual-embedding extraction in low-light / night conditions:
+            # Evaluate both illumination-normalized and raw crops against reference photos
+            aligned_enh = self.recognizer.alignCrop(crop_enh, best_face)
+            feat_enh = self.recognizer.feature(aligned_enh)
+
+            feat_raw = None
+            if is_low_light:
+                try:
+                    aligned_raw = self.recognizer.alignCrop(crop, best_face)
+                    feat_raw = self.recognizer.feature(aligned_raw)
+                except Exception:
+                    feat_raw = None
 
             # Compute similarities against all registered watchlist identities
             scores = []
             for name, ref_feat in self.watchlist_embeddings.items():
-                sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
+                sim_enh = float(self.recognizer.match(feat_enh, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
+                if feat_raw is not None:
+                    sim_raw = float(self.recognizer.match(feat_raw, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
+                    sim = max(sim_enh, sim_raw)
+                else:
+                    sim = sim_enh
                 scores.append((sim, name))
 
             scores.sort(key=lambda s: s[0], reverse=True)
             best_sim, best_candidate = scores[0]
             second_sim = scores[1][0] if len(scores) > 1 else 0.0
 
-            # Dynamic thresholding based on face bounding box size
-            required_thresh = self.cosine_threshold
-            if fw < 30.0 or fh < 30.0:
-                required_thresh = max(required_thresh, 0.52)
-            elif fw < 45.0 or fh < 45.0:
-                required_thresh = max(required_thresh, 0.48)
+            # Adaptive dynamic thresholding based on ambient illumination & face size
+            if is_low_light:
+                base_thresh = 0.40
+            elif crop_mean_luma < 120.0:
+                base_thresh = 0.44
+            else:
+                base_thresh = self.cosine_threshold
 
-            # Top-2 Separation Margin: A true match has a clear margin over the second-best candidate.
-            # If multiple people have almost identical similarity, it is an ambiguous/unlisted face.
+            required_thresh = base_thresh
+            if fw < 26.0 or fh < 26.0:
+                required_thresh = max(required_thresh, base_thresh + 0.04)
+            elif fw < 38.0 or fh < 38.0:
+                required_thresh = max(required_thresh, base_thresh + 0.02)
+
+            # Separation Margin: confirmed match if clear lead over 2nd profile or high single score
             margin = best_sim - second_sim
-            is_confident_match = (best_sim >= required_thresh) and (margin >= 0.040 or best_sim >= 0.65)
+            is_confident_match = (best_sim >= required_thresh) and (
+                margin >= 0.030 or best_sim >= 0.55 or len(scores) <= 1
+            )
 
             if is_confident_match:
                 best_name = best_candidate
