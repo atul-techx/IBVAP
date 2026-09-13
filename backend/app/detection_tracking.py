@@ -50,6 +50,8 @@ from ultralytics import YOLO
 try:
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
+    cv2.setNumThreads(1)
+    cv2.ocl.setUseOpenCL(False)
 except Exception:
     pass
 
@@ -2039,6 +2041,14 @@ def run_tracking_and_fence(
                         break
                 except cv2.error:
                     can_display = False
+            else:
+                # Cloud / Headless rate pacer for video file replay:
+                # Maintain realistic ~20 FPS so that cloud CPU is not 100% pegged and RAM/cache stays lean
+                if not is_webcam and not is_live_stream:
+                    target_time = 1.0 / 22.0
+                    elapsed = time.perf_counter() - t0
+                    if elapsed < target_time:
+                        time.sleep(target_time - elapsed)
 
     finally:
         cap.release()
