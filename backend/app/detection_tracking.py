@@ -35,13 +35,21 @@ def get_live_frame_path(camera_id: str) -> Path:
     temp_dir = Path(tempfile.gettempdir()) / "ibvap_live"
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir / f"live_frame_{camera_id}.jpg"
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import supervision as sv
 import torch
 from ultralytics import YOLO
 
-# Optimize PyTorch CPU threading for real-time video analytics
+# Limit PyTorch CPU threading to 1 thread for cloud & memory-constrained environments
 try:
-    torch.set_num_threads(os.cpu_count() or 4)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
 except Exception:
     pass
 
@@ -1010,8 +1018,8 @@ def run_tracking_and_fence(
     else:
         print("[!] Face Recognition Module: DISABLED (Models could not be loaded)")
 
-    # Initialize ANPR Engine (License Plate Localization + EasyOCR Character Recognition)
-    ocr_reader = get_or_create_easyocr_reader()
+    # ANPR Engine (Lazy-loaded only if vehicle detection occurs to conserve RAM)
+    ocr_reader = None
     vehicle_plate_cache: dict[int, dict] = {}
 
     frame_idx = 0
@@ -1081,6 +1089,11 @@ def run_tracking_and_fence(
             # Successful frame read, reset reconnect counter
             reconnect_attempts = 0
             frame_idx += 1
+
+            # Periodic garbage collection to maintain low RAM footprint in 512MB cloud environments
+            if frame_idx % 45 == 0:
+                import gc
+                gc.collect()
 
             # Update resolution if changed dynamically
             if max_frames is not None and frame_idx > max_frames:
@@ -1293,6 +1306,8 @@ def run_tracking_and_fence(
                             plate_number = cached_p.get("plate_number")
                             plate_confidence = cached_p.get("plate_confidence")
                         elif cached_p is None or (frame_idx - cached_p.get("last_checked", 0)) >= 15:
+                            if ocr_reader is None:
+                                ocr_reader = get_or_create_easyocr_reader()
                             p_bbox, p_text, p_conf = detect_and_read_license_plate(frame, (x1, y1, x2, y2), ocr_reader)
                             plate_bbox = p_bbox
                             plate_number = p_text
