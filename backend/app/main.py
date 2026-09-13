@@ -304,7 +304,23 @@ def launch_analytics_stream(
         cmd.append("--no-zone")
 
     if source_type == "webcam" or source == "0":
-        cmd.extend(["--input", "0", "--no-weather-mode"])
+        # Check if hardware webcam 0 can actually be opened (it won't exist on cloud/Render)
+        can_open_webcam = False
+        try:
+            test_cap = cv2.VideoCapture(0)
+            can_open_webcam = test_cap.isOpened()
+            test_cap.release()
+        except Exception:
+            can_open_webcam = False
+
+        if can_open_webcam:
+            cmd.extend(["--input", "0", "--no-weather-mode"])
+        else:
+            sample_file = test_videos_dir / "sample.mp4"
+            if sample_file.exists():
+                cmd.extend(["--input", str(sample_file), "--loop"])
+            else:
+                cmd.extend(["--input", "0", "--no-weather-mode"])
     else:
         video_file = None
         if source:
