@@ -348,11 +348,12 @@ def launch_analytics_stream(
     sub_env["OPENBLAS_NUM_THREADS"] = "1"
     sub_env["MKL_NUM_THREADS"] = "1"
     sub_env["PYTHONUNBUFFERED"] = "1"
+    print(f"[+] Launching stream process for {camera_id}: {' '.join(cmd)}")
 
     proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=None,
+        stderr=None,
         env=sub_env,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
     )
