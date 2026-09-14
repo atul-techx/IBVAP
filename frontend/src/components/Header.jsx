@@ -46,7 +46,7 @@ export default function Header({
         </div>
         <div>
           <div className="brand-title">
-            IBVAP <span style={{ color: '#0ea5e9' }}>CORE</span>
+            IBVAP <span style={{ color: '#0284c7' }}>CORE</span>
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.01em' }}>
             Intelligent Border Video Analytics Platform
@@ -90,7 +90,7 @@ export default function Header({
             onClick={() => setActiveTab('admin')}
             aria-pressed={activeTab === 'admin'}
           >
-            <ShieldCheck size={16} style={{ color: activeTab === 'admin' ? '#38bdf8' : 'currentColor' }} />
+            <ShieldCheck size={16} style={{ color: activeTab === 'admin' ? '#fff' : 'currentColor' }} />
             <span>Admin Panel</span>
           </button>
         )}

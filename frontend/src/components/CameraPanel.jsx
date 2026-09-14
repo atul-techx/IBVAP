@@ -46,10 +46,10 @@ export default function CameraPanel({
           <button
             onClick={() => setIsCctvModalOpen(true)}
             style={{
-              background: 'rgba(14, 165, 233, 0.16)',
-              border: '1px solid #38bdf8',
-              color: '#38bdf8',
-              padding: '0.22rem 0.65rem',
+              background: '#e0f2fe',
+              border: '1px solid #bae6fd',
+              color: '#0284c7',
+              padding: '0.25rem 0.65rem',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.74rem',
               fontWeight: 700,
@@ -67,9 +67,9 @@ export default function CameraPanel({
           <span
             className="badge-tag"
             style={{
-              background: 'rgba(16, 185, 129, 0.15)',
-              color: '#34d399',
-              border: '1px solid rgba(16, 185, 129, 0.35)',
+              background: '#f0fdf4',
+              color: '#166534',
+              border: '1px solid #bbf7d0',
             }}
           >
             {physicalCamerasCount} PHYSICAL CAM / {validCameras.length || 4} SECTORS
@@ -104,14 +104,14 @@ export default function CameraPanel({
                 title={`Switch live feed view to ${cam.name}`}
               >
                 <div className="camera-header">
-                  <div className="camera-name" style={{ color: isSelected ? '#38bdf8' : '#fff' }}>
-                    <Radio size={15} style={{ color: isPhys ? '#34d399' : '#f59e0b' }} />
+                  <div className="camera-name" style={{ color: isSelected ? '#0284c7' : 'var(--text-primary)' }}>
+                    <Radio size={15} style={{ color: isPhys ? '#16a34a' : '#d97706' }} />
                     <span>{cam.name}</span>
                     {isSelected && (
                       <span
                         style={{
                           fontSize: '0.66rem',
-                          background: isPhys ? '#0ea5e9' : '#d97706',
+                          background: isPhys ? '#0284c7' : '#d97706',
                           color: '#fff',
                           padding: '0.12rem 0.4rem',
                           borderRadius: '4px',

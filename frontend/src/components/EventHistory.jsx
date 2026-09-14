@@ -382,7 +382,7 @@ export default function EventHistory({ onSelectEvent }) {
                       />
                     </div>
                   </td>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#f8fafc' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>
                     #{ev.frame_number}
                   </td>
                   <td>
@@ -423,7 +423,7 @@ export default function EventHistory({ onSelectEvent }) {
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, color: '#fff' }}>
+                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                         {ev.camera_id === 'SYSTEM_AUTH' ? 'OPERATOR AUTH' : `${ev.object_class?.toUpperCase()} #${ev.track_id}`}
                       </span>
                       {ev.identified_as && ev.identified_as !== 'UNKNOWN' && (
@@ -471,12 +471,12 @@ export default function EventHistory({ onSelectEvent }) {
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '680px', border: '1px solid #10b981', background: '#0a1018' }}
+            style={{ maxWidth: '680px', border: '1px solid var(--border-subtle)', background: '#ffffff' }}
           >
-            <div className="modal-header" style={{ borderBottom: '1px solid rgba(16, 185, 129, 0.3)' }}>
+            <div className="modal-header" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                <ShieldCheck size={22} style={{ color: '#10b981' }} />
-                <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.05rem', color: '#fff' }}>
+                <ShieldCheck size={22} style={{ color: '#16a34a' }} />
+                <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
                   {certificateData.title}
                 </span>
               </div>

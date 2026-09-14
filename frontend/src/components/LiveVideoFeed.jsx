@@ -666,12 +666,12 @@ export default function LiveVideoFeed({
           alignItems: 'center',
           gap: '0.5rem',
           padding: '0.5rem 1.1rem',
-          background: 'rgba(15, 23, 42, 0.75)',
+          background: '#f8fafc',
           borderBottom: '1px solid var(--border-subtle)',
           overflowX: 'auto',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38bdf8', fontSize: '0.74rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.4rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#0284c7', fontSize: '0.74rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.4rem' }}>
           <Video size={14} />
           <span>Switch Camera:</span>
         </div>
@@ -690,19 +690,19 @@ export default function LiveVideoFeed({
                 padding: '0.35rem 0.85rem',
                 borderRadius: 'var(--radius-sm)',
                 border: isSelected
-                  ? (isPhys ? '1.5px solid #10b981' : '1.5px solid #f59e0b')
-                  : '1px solid rgba(148, 163, 184, 0.2)',
+                  ? (isPhys ? '1.5px solid #16a34a' : '1.5px solid #d97706')
+                  : '1px solid #e2e8f0',
                 background: isSelected
-                  ? (isPhys ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)')
-                  : 'rgba(15, 23, 42, 0.55)',
-                color: isSelected ? (isPhys ? '#34d399' : '#fbbf24') : '#94a3b8',
+                  ? (isPhys ? '#f0fdf4' : '#fffbeb')
+                  : '#ffffff',
+                color: isSelected ? (isPhys ? '#166534' : '#92400e') : '#64748b',
                 fontSize: '0.8rem',
                 fontWeight: isSelected ? 800 : 500,
                 cursor: 'pointer',
                 transition: 'all 0.18s ease',
                 whiteSpace: 'nowrap',
                 boxShadow: isSelected
-                  ? (isPhys ? '0 0 10px rgba(16, 185, 129, 0.35)' : '0 0 10px rgba(245, 158, 11, 0.35)')
+                  ? '0 1px 3px rgba(0, 0, 0, 0.08)'
                   : 'none',
               }}
             >
@@ -711,8 +711,7 @@ export default function LiveVideoFeed({
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  backgroundColor: isPhys ? '#10b981' : '#f59e0b',
-                  boxShadow: isPhys ? '0 0 6px #10b981' : 'none',
+                  backgroundColor: isPhys ? '#16a34a' : '#d97706',
                 }}
               />
               <span>{cam.name || cam.camera_id}</span>
@@ -721,8 +720,8 @@ export default function LiveVideoFeed({
                   fontSize: '0.62rem',
                   padding: '0.1rem 0.35rem',
                   borderRadius: '3px',
-                  background: isPhys ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                  color: isPhys ? '#34d399' : '#fbbf24',
+                  background: isPhys ? '#dcfce7' : '#fef3c7',
+                  color: isPhys ? '#166534' : '#92400e',
                   fontWeight: 700,
                   marginLeft: '0.25rem',
                   letterSpacing: '0.03em',
@@ -740,11 +739,11 @@ export default function LiveVideoFeed({
         <div className="live-feed-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div
             className={`status-indicator ${isPhysicalCamera ? (isCamOnline ? 'online' : 'standby') : 'offline'}`}
-            style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { borderColor: '#f59e0b', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.12)' } : {}}
+            style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { borderColor: '#fde68a', color: '#92400e', background: '#fffbeb' } : {}}
           >
             <span
               className="pulse-dot"
-              style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { background: '#fbbf24', boxShadow: '0 0 8px #fbbf24' } : {}}
+              style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { background: '#d97706' } : {}}
             />
             {isPhysicalCamera
               ? (isCamOnline ? 'SURVEILLANCE ACTIVE // LIVE CAM' : 'STANDBY')
@@ -760,8 +759,8 @@ export default function LiveVideoFeed({
               onChange={(e) => onSelectCamera?.(e.target.value)}
               aria-label="Select Monitored Camera"
               style={{
-                background: '#0f172a',
-                color: '#f8fafc',
+                background: '#ffffff',
+                color: 'var(--text-primary)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '4px',
                 padding: '0.2rem 0.5rem',
@@ -771,7 +770,7 @@ export default function LiveVideoFeed({
               }}
             >
               {validCameras.map((cam) => (
-                <option key={cam.camera_id} value={cam.camera_id} style={{ background: '#0f172a', color: '#f8fafc' }}>
+                <option key={cam.camera_id} value={cam.camera_id} style={{ background: '#ffffff', color: '#0f172a' }}>
                   {cam.name || cam.camera_id} ({cam.location || 'Perimeter Sector'})
                 </option>
               ))}
@@ -782,8 +781,8 @@ export default function LiveVideoFeed({
         {/* Action Controls & Feed Selector */}
         <div className="feed-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           {/* Quick Video Scenario Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#0f172a', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56, 189, 248, 0.4)' }}>
-            <Film size={13} style={{ color: '#38bdf8' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#ffffff', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+            <Film size={13} style={{ color: '#0284c7' }} />
             <select
               value={activeSourceType === 'browser_webcam' ? 'browser_webcam' : selectedVideo}
               onChange={(e) => {
@@ -796,9 +795,9 @@ export default function LiveVideoFeed({
                 }
               }}
               style={{
-                background: '#0f172a',
+                background: '#ffffff',
                 border: 'none',
-                color: '#f8fafc',
+                color: 'var(--text-primary)',
                 fontSize: '0.78rem',
                 fontWeight: 600,
                 outline: 'none',
@@ -807,14 +806,14 @@ export default function LiveVideoFeed({
               }}
               title="Select Video Surveillance Scenario"
             >
-              <option value="browser_webcam" style={{ background: '#0f172a', color: '#34d399', fontWeight: 700 }}>📹 My Device Webcam (Live AI)</option>
-              <option value="sample.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Sector 01 (Bus & Person Intrusion)</option>
-              <option value="tracking_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Sector 04 (Multi-Target Tracking)</option>
-              <option value="dark_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Night Vision (CLAHE Retinex)</option>
-              <option value="foggy_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Adverse Fog (DCP Dehazing)</option>
-              <option value="suspicious_behavior_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Perimeter (Loitering & Pacing)</option>
-              <option value="real_footage_1.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Outpost 01 (Real Surveillance)</option>
-              <option value="real_footage_2.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Outpost 02 (Real Surveillance)</option>
+              <option value="browser_webcam" style={{ background: '#ffffff', color: '#16a34a', fontWeight: 700 }}>📹 My Device Webcam (Live AI)</option>
+              <option value="sample.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Sector 01 (Bus & Person Intrusion)</option>
+              <option value="tracking_test.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Sector 04 (Multi-Target Tracking)</option>
+              <option value="dark_test.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Night Vision (CLAHE Retinex)</option>
+              <option value="foggy_test.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Adverse Fog (DCP Dehazing)</option>
+              <option value="suspicious_behavior_test.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Perimeter (Loitering & Pacing)</option>
+              <option value="real_footage_1.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Outpost 01 (Real Surveillance)</option>
+              <option value="real_footage_2.mp4" style={{ background: '#ffffff', color: '#0f172a' }}>Outpost 02 (Real Surveillance)</option>
             </select>
           </div>
 
