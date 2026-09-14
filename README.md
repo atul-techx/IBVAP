@@ -6,11 +6,13 @@
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-00599C?logo=python&logoColor=white)](https://ultralytics.com)
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.8+-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org)
 [![WebSocket](https://img.shields.io/badge/Real--Time-WebSocket-orange?logo=websocket&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
-[![Security](https://img.shields.io/badge/Audit-SHA--256_Chained-red?logo=shield&logoColor=white)](#cryptographic-tamper-evident-audit-trail)
+[![Security](https://img.shields.io/badge/Audit-SHA--256_Chained-red?logo=shield&logoColor=white)](#cryptographic-tamper-evident-sha-256-audit-trail)
+[![Dual-DB](https://img.shields.io/badge/Database-PostgreSQL_%7C_SQLite-blue?logo=postgresql&logoColor=white)](#dual-engine-database-architecture)
+[![Cloud-Storage](https://img.shields.io/badge/Cloud-Cloudinary_CDN-0072B2?logo=cloudinary&logoColor=white)](#cloud-storage--cdn-integration)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > **Smart India Hackathon 2026**  
-> An automated, military-grade AI-powered border surveillance and video analytics platform engineered to process real-time multi-camera feeds, detect critical security events (unauthorized intrusion, anomalous vehicle movement, loitering, breach of dynamic virtual fences), maintain a tamper-evident audit trail, and deliver actionable situational awareness with instant voice alerts to command personnel.
+> An automated, military-grade AI-powered border surveillance and video analytics platform engineered to ingest real-time multi-camera feeds, detect critical security threats (unauthorized human infiltration, anomalous vehicle movements, loitering, breach of dynamic virtual fences), maintain a cryptographic tamper-evident audit trail, and deliver actionable situational awareness with instant synthesized voice alarms to command personnel.
 
 ---
 
@@ -24,12 +26,17 @@
   - [3. Dynamic Virtual Fence (Polygon Geo-Fencing)](#3-dynamic-virtual-fence-polygon-geo-fencing)
   - [4. Appearance Re-Identification (Re-ID)](#4-appearance-re-identification-re-id)
   - [5. Low-Light Nocturnal & Weather-Adaptive Dehazing](#5-low-light-nocturnal--weather-adaptive-dehazing)
-  - [6. Behavioral Anomaly Detection](#6-behavioral-anomaly-detection)
-  - [7. Watchlist Facial Recognition (Consented Demo)](#7-watchlist-facial-recognition-consented-demo)
+  - [6. Behavioral Anomaly Detection (Loitering & Pacing)](#6-behavioral-anomaly-detection-loitering--pacing)
+  - [7. Watchlist Facial Recognition (YuNet + SFace)](#7-watchlist-facial-recognition-yunet--sface)
   - [8. ANPR & Authorized Vehicle Whitelisting](#8-anpr--authorized-vehicle-whitelisting)
   - [9. Cryptographic Tamper-Evident SHA-256 Audit Trail](#9-cryptographic-tamper-evident-sha-256-audit-trail)
   - [10. Incident Video Replay & Evidence Extraction](#10-incident-video-replay--evidence-extraction)
-  - [11. Real-Time WebSockets & Voice Alert Audio Engine](#11-real-time-websockets--voice-alert-audio-engine)
+  - [11. Real-Time WebSockets & Tactical Voice Synthesizer](#11-real-time-websockets--tactical-voice-synthesizer)
+  - [12. Dual-Engine Database Architecture (PostgreSQL + SQLite)](#12-dual-engine-database-architecture-postgresql--sqlite)
+  - [13. Cloud Storage & CDN Integration (Cloudinary)](#13-cloud-storage--cdn-integration-cloudinary)
+  - [14. Live CCTV & RTSP Stream Integration Engine](#14-live-cctv--rtsp-stream-integration-engine)
+  - [15. Public Platform Overview & Telemetry Portal](#15-public-platform-overview--telemetry-portal)
+- [Tactical Dashboard & User Experience](#tactical-dashboard--user-experience)
 - [Repository Directory Structure](#repository-directory-structure)
 - [Technology Stack](#technology-stack)
 - [REST & WebSocket API Reference](#rest--websocket-api-reference)
@@ -40,21 +47,25 @@
 - [Running the Platform](#running-the-platform)
   - [1. Launch Backend Server](#1-launch-backend-server)
   - [2. Launch Frontend Tactical Dashboard](#2-launch-frontend-tactical-dashboard)
-  - [3. Standalone Verification & Pipeline Demos](#3-standalone-verification--pipeline-demos)
-  - [4. Real-Time Git Auto-Sync](#4-real-time-git-auto-sync)
+  - [3. Unified Production Mode (Single-Port Runner)](#3-unified-production-mode-single-port-runner)
+  - [4. Standalone Verification & Pipeline Benchmarks](#4-standalone-verification--pipeline-benchmarks)
+  - [5. Real-Time Git Auto-Sync](#5-real-time-git-auto-sync)
+- [Cloud Deployment Guide (Railway & Render)](#cloud-deployment-guide-railway--render)
 - [Ethical & Legal Compliance Disclaimer](#ethical--legal-compliance-disclaimer)
 
 ---
 
 ## Executive Summary
 
-Border security requires high-precision, low-latency automated surveillance capable of processing 24/7 video streams under harsh environmental conditions (fog, nocturnal darkness, rain). **IBVAP** bridges cutting-edge computer vision (YOLOv8, tuned ByteTrack, YuNet/SFace, EasyOCR) with an enterprise-grade tactical command dashboard.
+Border security requires high-precision, low-latency automated surveillance capable of processing 24/7 video streams under extreme environmental conditions (dense fog, nocturnal darkness, rain, dust storms). **IBVAP** bridges state-of-the-art computer vision (`YOLOv8`, tuned `ByteTrack`, `YuNet`/`SFace`, `EasyOCR`) with an enterprise-grade tactical command dashboard.
 
 ### Core Value Propositions:
-- **Instant Situational Awareness:** Live MJPEG video feeds with dynamic bounding boxes, polygon security zones, and real-time audio chime + synthesized voice alerts.
-- **Precision Tracking & Anti-Occlusion:** High-fidelity multi-camera tracking with HSV chromatic histogram Re-ID and spatial-temporal bounding association.
-- **Zero-Trust Event Logging:** Every security breach is cryptographically chained via continuous SHA-256 hashing to guarantee forensic non-repudiation.
-- **Instant Incident Replay:** Operators can click any alert to extract and review pre/post-event incident video clips and high-resolution target crops.
+- **Instant Situational Awareness:** Live low-latency MJPEG video feeds with dynamic bounding boxes, dynamic polygon keep-out zones, and real-time audio chime + synthesized voice alerts.
+- **Precision Tracking & Anti-Occlusion:** High-fidelity multi-camera tracking with HSV chromatic histogram Re-ID and spatial-temporal bounding box association.
+- **Zero-Trust Event Logging:** Every security event is cryptographically chained via continuous SHA-256 hashing from a genesis block to guarantee forensic non-repudiation.
+- **Instant Incident Replay:** Operators can click any alert to extract pre/post-event incident MP4 video clips and high-resolution target crops.
+- **Dual-Engine Persistence:** Automatic PostgreSQL detection for cloud environments (Railway, Supabase) with zero-config fallback to local SQLite for edge/offline deployments.
+- **Cloud Object Storage:** Permanent Cloudinary CDN integration for watchlist biometrics and evidence snapshots across ephemeral cloud container redeployments.
 - **Granular Access Control:** Role-Based Access Control (Admin vs. Operator) protecting sensitive settings, watchlist databases, and audit verification certificates.
 
 ---
@@ -68,7 +79,7 @@ graph TD
         CAM2["Camera 02 (Sector Bravo)"]
         CAM3["Camera 03 (Checkpoint Zulu)"]
         CAM4["Camera 04 (Vehicle Gate Delta)"]
-        RTSP["RTSP / Video File Feeds"]
+        RTSP["Live RTSP / ONVIF / CCTV Feeds"]
     end
 
     subgraph AI_Core["FastAPI Backend & AI Analytics Engine"]
@@ -80,15 +91,20 @@ graph TD
         Behavior["Loitering & Pacing Heuristics"]
         BioEng["YuNet + SFace Facial Watchlist Engine"]
         ANPREng["Sobel + EasyOCR Vehicle Plate Engine"]
-        AuditLog["SQLite + SHA-256 Chained Hash Ledger"]
+        DualDB["Dual-Engine DB (PostgreSQL / SQLite)"]
+        AuditLog["SHA-256 Chained Hash Ledger"]
         ReplaySvc["Incident Replay Clip & Crop Service"]
+        CloudCDN["Cloudinary Storage & CDN Subsystem"]
     end
 
     subgraph Frontend_UI["Tactical Command Dashboard (React + Vite)"]
+        Overview["Public Platform Overview & Telemetry"]
+        Auth["Tactical Biometric-Style Login (JWT RBAC)"]
         WS["WebSocket Listener (/ws/events)"]
         LiveFeed["Live MJPEG Multi-Camera Video Player"]
         AlertFeed["Live Alert Feed with Priority Tagging"]
         VoiceAlert["Synthesized Voice & Audio Alert Engine"]
+        CctvModal["Dynamic RTSP / IP Camera Connector"]
         History["Event History & Incident Replay Modal"]
         AdminUI["Admin Panel (Watchlist & Whitelist Management)"]
         CertModal["Cryptographic Audit Certificate Modal"]
@@ -100,8 +116,10 @@ graph TD
     Tracker --> Behavior
     Tracker --> BioEng
     Tracker --> ANPREng
-    GeoFence & Behavior & BioEng & ANPREng --> AuditLog
+    GeoFence & Behavior & BioEng & ANPREng --> DualDB
+    DualDB --> AuditLog
     AuditLog --> ReplaySvc
+    ReplaySvc & BioEng --> CloudCDN
     AuditLog -. Real-Time Alerts .-> WS
     WS --> AlertFeed & VoiceAlert & LiveFeed
     StreamHub -. MJPEG Stream .-> LiveFeed
@@ -113,33 +131,34 @@ graph TD
 
 ### 1. Multi-Object Detection & ByteTrack Tracking
 - Powered by **Ultralytics YOLOv8** coupled with custom-tuned **ByteTrack** parameters (`backend/app/bytetrack_tuned.yaml`).
-- Detects, classifies, and tracks `person`, `car`, `truck`, `bus`, `motorcycle`, and unexpected animal movements.
-- Minimum track hysteresis debouncing prevents momentary detection flickers from generating false positive alarm storms.
+- Detects, classifies, and tracks `person`, `car`, `truck`, `bus`, `motorcycle`, and unexpected animal movements at 30+ FPS.
+- Minimum track hysteresis debouncing prevents momentary detection flickers from triggering false positive alarm storms.
 
 ### 2. Multi-Stream Ingestion & Live Switching Hub
 - Implemented in `backend/app/stream_hub.py` via an asynchronous, thread-safe frame buffer.
-- Supports switching live feeds dynamically across registered surveillance cameras (`CAM_01` through `CAM_04`) and on-demand video files.
-- Provides standard MJPEG video streaming endpoints (`/api/live-feed/{camera_id}`) and single-frame snapshots for ultra-low latency playback in modern web browsers without heavy media plugins.
+- Supports switching live feeds dynamically across registered surveillance cameras (`CAM_01` through `CAM_04`), live RTSP feeds, and on-demand video files.
+- Provides standard MJPEG video streaming endpoints (`/api/live-feed/{camera_id}`) and single-frame snapshots for ultra-low latency playback in modern web browsers without heavy plugins.
 
 ### 3. Dynamic Virtual Fence (Polygon Geo-Fencing)
 - Real-time ray-casting Point-In-Polygon (PIP) algorithms evaluate tracked object centroids against arbitrary security zone geometries.
+- **Interactive UI Drawing Canvas**: Operators can click and draw custom polygon keep-out zones directly on the live video stream.
 - Features a **3-frame hysteresis state machine**: requires persistent presence before triggering a breach and prevents bouncing at boundary edges.
-- Generates categorized `CRITICAL` perimeter intrusion security events.
+- Generates prioritized `CRITICAL` perimeter intrusion security events.
 
 ### 4. Appearance Re-Identification (Re-ID)
 - Retains track identity when subjects are momentarily occluded behind terrain, vehicles, or border structures.
-- Combines normalized HSV-weighted chromatic histograms with spatial-temporal bounding box predictions to reconnect broken trajectories.
+- Combines normalized HSV-weighted chromatic histograms with spatial-temporal bounding box predictions to reconnect broken trajectories across occlusions and camera sectors.
 
 ### 5. Low-Light Nocturnal & Weather-Adaptive Dehazing
 - **Nocturnal CLAHE Enhancement**: Automatically computes mean luminance; applies Contrast Limited Adaptive Histogram Equalization on the CIELAB Lightness ($L^*$) channel when nocturnal conditions are detected.
 - **Weather Dehazing**: Employs Dark Channel Prior (DCP) optical attenuation modeling to penetrate heavy border fog, dust storms, and heavy rain.
 
-### 6. Behavioral Anomaly Detection
+### 6. Behavioral Anomaly Detection (Loitering & Pacing)
 - Analyzes trajectory coordinate histories over temporal sliding windows:
   - **Loitering Detection**: Flags targets lingering in high-risk zones longer than configurable threshold limits (e.g., > 10 seconds).
-  - **Oscillating Horizontal Pacing**: Detects repetitive back-and-forth movement signatures indicative of patrol surveillance or scouting behavior.
+  - **Oscillating Horizontal Pacing**: Detects repetitive back-and-forth movement signatures indicative of patrol surveillance, scouting, or fence-breach preparation.
 
-### 7. Watchlist Facial Recognition (Consented Demo)
+### 7. Watchlist Facial Recognition (YuNet + SFace)
 - Utilizes OpenCV DNN **YuNet** for ultra-fast face detection & 5-point landmark alignment.
 - Computes 128-dimensional deep feature embeddings using **SFace**.
 - Performs cosine similarity matching against registered authorized personnel in `backend/watchlist/`.
@@ -162,14 +181,47 @@ graph TD
 ### 10. Incident Video Replay & Evidence Extraction
 - For every logged security event, `backend/app/replay_service.py` automatically slices a focused pre/post-event MP4 clip (e.g., 4 seconds prior to 4 seconds post event).
 - Extracts a high-resolution target crop image highlighting the exact subject/vehicle that triggered the alarm.
-- Accessible directly from the dashboard event history table.
+- Accessible directly from the dashboard event history table with full video player playback.
 
-### 11. Real-Time WebSockets & Voice Alert Audio Engine
+### 11. Real-Time WebSockets & Tactical Voice Synthesizer
 - FastAPI manages concurrent WebSocket connections on `/ws/events`, multicasting alerts to all active command terminals in `< 50ms`.
 - Frontend includes an intelligent **Voice Alert Synthesizer** (`frontend/src/services/voiceAlertService.js`):
   - Prioritizes `CRITICAL` alerts over lower priority items.
   - Synthesizes clear, audible speech warnings (e.g., *"Warning: Perimeter breach detected on Sector Alpha, Camera 01"*).
   - Preceded by a high-frequency tactical audio chime with queue deduplication and user volume/mute controls.
+
+### 12. Dual-Engine Database Architecture (PostgreSQL + SQLite)
+- Implemented in `backend/app/db_engine.py` with unified query parameter normalization (`?` vs `%s`).
+- **Cloud Mode**: Seamlessly switches to managed **PostgreSQL** when `DATABASE_URL` is set (Railway, Supabase, Neon).
+- **Edge Mode**: Automatically falls back to high-performance zero-configuration local **SQLite** when running offline at remote border outposts.
+
+### 13. Cloud Storage & CDN Integration (Cloudinary)
+- Implemented in `backend/app/cloud_storage.py`.
+- Solves container ephemerality on platforms like Railway and Render by automatically syncing enrolled watchlist portrait images and event snapshots to Cloudinary cloud storage.
+- Generates permanent, publicly accessible CDN URLs for reliable asset delivery across redeployments.
+
+### 14. Live CCTV & RTSP Stream Integration Engine
+- Integrated in `frontend/src/components/CctvConnectModal.jsx` and `backend/app/main.py`.
+- Allows tactical operators to connect external live RTSP IP cameras, HLS network video streams, and web feeds dynamically without restarting the server.
+- Built-in latency check, resolution negotiation, and automatic fallback to simulated test streams.
+
+### 15. Public Platform Overview & Telemetry Portal
+- Implemented in `frontend/src/components/PlatformOverview.jsx`.
+- Provides an unauthenticated public landing view for judges, stakeholders, and high-command personnel showcasing platform metrics, core capabilities, and live system architecture telemetry before logging into the restricted tactical console.
+
+---
+
+## Tactical Dashboard & User Experience
+
+| Module | Purpose | Key Functionalities |
+|---|---|---|
+| **Platform Overview** | Public Showcase & Telemetry | Interactive feature matrix, system architecture breakdown, and one-click transition to Command Center. |
+| **Tactical Login** | Access Security | Biometric-style animated login interface with JWT authentication and Role-Based Access Control (Admin vs. Operator). |
+| **Live Command Feed** | Real-Time Video Operations | Multi-camera switcher, live MJPEG stream with dynamic AI bounding boxes, Night Mode & Dehaze controls, and dynamic polygon drawing. |
+| **Live Alert Feed** | Immediate Threat Notifications | Scrolling real-time alert feed with audio chime, severity badges (`CRITICAL`, `HIGH`, `LOW`), and timestamp tracking. |
+| **Event History** | Forensic Analysis & Replay | Searchable, paginated event log with date/severity filters, pre/post incident MP4 video playback, target crops, and audit certificates. |
+| **Admin Command Center** | Biometric & Vehicle Whitelists | Enrolls facial identities (YuNet/SFace), manages authorized vehicle plates (EasyOCR), initiates pipeline tests, and monitors system health. |
+| **CCTV Connector** | Camera Provisioning | Dynamic modal to register live RTSP, ONVIF, and HTTP video feeds directly into the active camera pool. |
 
 ---
 
@@ -179,51 +231,65 @@ graph TD
 IBVAP/
 ├── backend/
 │   ├── app/
+│   │   ├── __init__.py
 │   │   ├── admin_management.py         # Watchlist & vehicle whitelist DB handlers
 │   │   ├── auth.py                     # JWT token generation, bcrypt, and RBAC guards
-│   │   ├── bytetrack_tuned.yaml        # Tuned ByteTrack configuration file
+│   │   ├── bytetrack_tuned.yaml        # Tuned ByteTrack tracking configuration
+│   │   ├── cloud_storage.py            # Cloudinary CDN object storage integration
+│   │   ├── db_engine.py                # Dual-Engine DB manager (PostgreSQL + SQLite)
 │   │   ├── detection_tracking.py       # YOLOv8 + ByteTrack + Re-ID + Geo-Fence core
-│   │   ├── events.py                   # SQLite schema, SHA-256 chained audit ledger
+│   │   ├── events.py                   # Schema & SHA-256 chained audit ledger
 │   │   ├── face_engine.py              # YuNet + SFace biometric recognition engine
 │   │   ├── main.py                     # FastAPI server, REST routes & WebSocket hub
 │   │   ├── replay_service.py           # Pre/post incident clip and crop generator
 │   │   ├── stream_hub.py               # Multi-camera frame ingestion & MJPEG streamer
+│   │   ├── weather_enhancement.py      # CLAHE & Dark Channel Prior dehaze filters
 │   │   ├── test_detection.py           # Verification script for local video tests
-│   │   └── weather_enhancement.py      # CLAHE & Dark Channel Prior dehaze filters
+│   │   ├── benchmark_weather_dehaze.py # Dehaze and low-light evaluation benchmark
+│   │   └── test_audit_certificate.py   # Cryptographic audit hash integrity verifier
 │   ├── models/                         # YOLOv8n, YuNet, and SFace ONNX weight files
 │   ├── snapshots/                      # Stored event snapshot JPEGs
 │   ├── test_videos/                    # Sample test clips (perimeter, night, traffic)
 │   ├── watchlist/                      # Enrolled face images for authorized personnel
 │   ├── requirements.txt                # Python backend dependencies
-│   └── ibvap.db                        # SQLite database (events, audit, users, whitelist)
+│   └── events.db                       # Local SQLite database (fallback mode)
 ├── frontend/
-│   ├── public/                         # Public assets and favicon
+│   ├── public/                         # Public assets, military emblems, and favicon
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── AdminPanel.jsx          # Personnel watchlist & vehicle whitelist UI
 │   │   │   ├── CameraPanel.jsx         # Camera status & stream switcher
+│   │   │   ├── CctvConnectModal.jsx    # Live RTSP / IP camera connection modal
 │   │   │   ├── EventHistory.jsx        # Searchable event table, replay & audit cert
-│   │   │   ├── Header.jsx              # Status indicators, clock & user profile
+│   │   │   ├── Header.jsx              # Status indicators, clock, voice controls & user profile
 │   │   │   ├── LiveAlertFeed.jsx       # Real-time scrolling alert notification feed
-│   │   │   ├── LiveVideoFeed.jsx       # Interactive video player with live stream switch
+│   │   │   ├── LiveVideoFeed.jsx       # Interactive video player with dynamic polygon canvas
 │   │   │   ├── LoginPage.jsx           # Tactical biometric-style login page
+│   │   │   ├── PlatformOverview.jsx    # Public platform landing page & telemetry showcase
 │   │   │   ├── SnapshotModal.jsx       # Full-resolution evidence & replay viewer
 │   │   │   └── StatsRow.jsx            # Real-time KPI summary counter cards
 │   │   ├── context/
-│   │   │   └── AuthContext.jsx         # User auth state, tokens & permissions
+│   │   │   └── AuthContext.jsx         # User auth state, JWT tokens & permissions
 │   │   ├── services/
-│   │   │   ├── api.js                  # Axios/fetch API communication layer
-│   │   │   └── voiceAlertService.js    # TTS voice alerts & priority audio queue
-│   │   ├── App.jsx                     # Main tactical layout assembler
+│   │   │   ├── api.js                  # Axios/fetch API communication layer & endpoints
+│   │   │   └── voiceAlertService.js    # TTS voice alerts & priority audio chime queue
+│   │   ├── App.jsx                     # Main tactical layout assembler & state controller
 │   │   ├── index.css                   # Cyberpunk / tactical dark-mode design system
 │   │   └── main.jsx                    # React application root entrypoint
 │   ├── package.json                    # Frontend dependencies & scripts
 │   └── vite.config.js                  # Vite configuration & dev proxy
+├── Dockerfile                          # Multi-stage container definition
+├── railway.json                        # Railway.app cloud deployment configuration
+├── render.yaml                         # Render.com unified deployment specification
+├── Procfile                            # Heroku / Dokku process file
+├── Aptfile                             # System dependencies (libgl1, libglib2.0)
+├── run.py                              # Unified single-port server launcher
 ├── auto_git_sync.ps1                   # Real-time PowerShell background auto-sync
 ├── auto_git_sync.bat                   # 1-click batch launcher for auto-sync
 ├── sync_now.bat                        # 1-click immediate manual push launcher
-├── .gitignore
-└── README.md
+├── requirements.txt                    # Root-level requirements wrapper
+├── yolov8n.pt                          # Ultralytics YOLOv8 nano pre-trained weights
+└── README.md                           # Documentation
 ```
 
 ---
@@ -235,13 +301,15 @@ IBVAP/
 | **Computer Vision** | **Ultralytics YOLOv8** | Real-time object detection and classification |
 | **Object Tracking** | **ByteTrack + Re-ID** | Spatial-temporal tracking & appearance histograms |
 | **Biometrics** | **YuNet + SFace (ONNX)** | 5-point landmark face detection & 128-d cosine matching |
-| **OCR** | **EasyOCR + OpenCV** | License plate localization & text recognition |
-| **Image Enhancement** | **CLAHE + DCP Dehaze** | Nocturnal low-light & weather-adaptive vision |
+| **OCR & ANPR** | **EasyOCR + OpenCV** | License plate localization & alphanumeric extraction |
+| **Image Enhancement** | **CLAHE + DCP Dehaze** | Nocturnal low-light & weather-adaptive dehazing |
 | **Backend Framework** | **FastAPI + Uvicorn** | High-throughput asynchronous REST API & WebSockets |
-| **Database & Audit** | **SQLite + SHA-256** | Chained tamper-evident cryptographic event logging |
-| **Frontend Framework**| **React 18 + Vite** | High-performance tactical operator interface |
-| **Styling & Icons** | **Custom CSS + Lucide**| Ultra-dark military tactical UI with glassmorphism |
-| **Audio Engine** | **Web Speech API** | Synthesized tactical voice alerts and notification chime |
+| **Database Architecture** | **PostgreSQL / SQLite** | Dual-Engine DB with parameter normalization |
+| **Cryptographic Audit** | **SHA-256 Continuous Hash**| Blockchain-inspired tamper-evident forensic ledger |
+| **Cloud Storage & CDN** | **Cloudinary API** | Permanent snapshot and biometric cloud persistence |
+| **Frontend Framework** | **React 18 + Vite** | High-performance tactical operator single-page app |
+| **Tactical Styling** | **Vanilla CSS + Lucide** | Ultra-dark military cyber-aesthetic with glassmorphism |
+| **Audio & Speech Engine**| **Web Speech API** | Synthesized tactical voice alerts and priority chime |
 
 ---
 
@@ -250,7 +318,7 @@ IBVAP/
 ### Authentication & RBAC
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/auth/login` | Authenticate with credentials and receive JWT bearer token |
+| `POST` | `/api/auth/login` | Authenticate credentials and receive JWT bearer token |
 | `GET` | `/api/auth/me` | Retrieve profile and role permissions of current user |
 | `GET` | `/api/auth/config` | Retrieve current authentication system configuration |
 
@@ -259,7 +327,7 @@ IBVAP/
 |---|---|---|
 | `GET` | `/api/events` | List security events (supports filtering by camera, severity, type) |
 | `GET` | `/api/events/{id}` | Get detailed data for a specific security event |
-| `GET` | `/api/snapshots/{id}`| Retrieve high-resolution evidence snapshot JPEG |
+| `GET` | `/api/snapshots/{id}` | Retrieve high-resolution evidence snapshot JPEG |
 | `GET` | `/api/events/{id}/replay` | Stream or download pre/post-event incident MP4 replay clip |
 | `GET` | `/api/events/{id}/crop` | Retrieve high-resolution cropped bounding box of target |
 | `GET` | `/api/audit/verify` | Re-verify cryptographic SHA-256 hash chain from genesis block |
@@ -275,7 +343,7 @@ IBVAP/
 | `POST` | `/api/stream/stop` | Stop active tracking stream pipeline |
 | `GET` | `/api/stream/status` | Query active tracking status and source metadata |
 
-### Cameras, Stats & Health
+### Cameras, Telemetry & Health
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/cameras` | List all registered surveillance cameras and online heartbeats |
@@ -303,7 +371,7 @@ IBVAP/
 ## Installation & Getting Started
 
 ### Prerequisites
-- **Python**: 3.10 or higher
+- **Python**: 3.10 or 3.11
 - **Node.js**: v18.0.0 or higher (with `npm`)
 - **Git**: Installed and configured
 - **OS**: Windows 10/11, Ubuntu 22.04+, or macOS
@@ -335,8 +403,8 @@ IBVAP/
    pip install -r backend/requirements.txt
    ```
 
-4. **Verify YOLOv8 Model Weights:**
-   The base weight file `yolov8n.pt` will automatically download on first run if not already present in the project root.
+4. **Verify YOLOv8 Weights:**
+   The lightweight weights `yolov8n.pt` are included in the repository root and will auto-load on first start.
 
 ---
 
@@ -361,14 +429,10 @@ IBVAP/
 From the project root (with virtual environment activated):
 
 ```bash
-# Windows:
+# Windows / Linux:
 python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Or run directly inside backend/app:
-cd backend/app
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
-The API documentation will be interactively available at:
+Interactive API documentation:
 - **Swagger UI**: `http://localhost:8000/docs`
 - **ReDoc**: `http://localhost:8000/redoc`
 
@@ -376,14 +440,14 @@ The API documentation will be interactively available at:
 
 ### 2. Launch Frontend Tactical Dashboard
 
-In a separate terminal, navigate to the `frontend/` directory:
+In a separate terminal, navigate to `frontend/`:
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-Open your browser and navigate to:
+Open your browser at:
 ```
 http://localhost:5173
 ```
@@ -393,7 +457,25 @@ http://localhost:5173
 
 ---
 
-### 3. Standalone Verification & Pipeline Demos
+### 3. Unified Production Mode (Single-Port Runner)
+
+To run the entire platform (Backend + Embedded Frontend) on a single port (ideal for cloud deployments):
+
+1. **Build the React frontend:**
+   ```bash
+   cd frontend
+   npm run build
+   cd ..
+   ```
+2. **Start the unified runner:**
+   ```bash
+   python run.py
+   ```
+3. Visit `http://localhost:8000` to access the full platform.
+
+---
+
+### 4. Standalone Verification & Pipeline Benchmarks
 
 Run automated standalone test verification scripts to benchmark vision and tracking pipelines:
 
@@ -413,7 +495,7 @@ python backend/app/test_e2e_admin_phase_a.py
 
 ---
 
-### 4. Real-Time Git Auto-Sync
+### 5. Real-Time Git Auto-Sync
 
 For collaborative hackathon environments where team members continuously push updates:
 
@@ -423,6 +505,29 @@ For collaborative hackathon environments where team members continuously push up
   ```powershell
   powershell -ExecutionPolicy Bypass -File ./auto_git_sync.ps1
   ```
+
+---
+
+## Cloud Deployment Guide (Railway & Render)
+
+### Deploying to Railway
+1. Fork or push the repository to GitHub.
+2. In Railway, click **New Project** $\rightarrow$ **Deploy from GitHub repo**.
+3. Railway automatically recognizes `railway.json` and runs `python run.py`.
+4. (Optional) Provision a Railway PostgreSQL database. Railway will automatically populate `DATABASE_URL`, switching IBVAP from SQLite to PostgreSQL.
+5. (Optional) Add `CLOUDINARY_URL` in Railway Variables to enable persistent cloud object storage.
+
+### Deploying to Render
+1. Create a **New Web Service** connected to your repository.
+2. Render detects `render.yaml` automatically.
+3. Build Command:
+   ```bash
+   pip install --upgrade pip && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r backend/requirements.txt
+   ```
+4. Start Command:
+   ```bash
+   python run.py
+   ```
 
 ---
 
