@@ -126,6 +126,17 @@ class WatchlistFaceRecognizer:
 
     def reload_watchlist(self):
         """Scans backend/watchlist/ and extracts 128-d SFace embeddings for all reference images."""
+        # Ensure any cloud-stored photos from Cloudinary CDN are synced to local disk first
+        try:
+            from backend.app.admin_management import sync_cloud_watchlist_to_disk
+            sync_cloud_watchlist_to_disk(watchlist_dir=self.watchlist_dir)
+        except Exception:
+            try:
+                from admin_management import sync_cloud_watchlist_to_disk
+                sync_cloud_watchlist_to_disk(watchlist_dir=self.watchlist_dir)
+            except Exception:
+                pass
+
         self.watchlist_embeddings.clear()
         if not self.detector or not self.recognizer:
             return

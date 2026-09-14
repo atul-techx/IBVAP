@@ -827,11 +827,11 @@ export default function AdminPanel() {
                           <td className="cell-photo">
                             <div
                               className="table-photo-thumb"
-                              onClick={() => setPreviewModalImg(getWatchlistPhotoUrl(person.photo_filename))}
+                              onClick={() => setPreviewModalImg(person.photo_url || getWatchlistPhotoUrl(person.photo_filename))}
                               title="Click to view full portrait"
                             >
                               <img
-                                src={getWatchlistPhotoUrl(person.photo_filename)}
+                                src={person.photo_url || getWatchlistPhotoUrl(person.photo_filename)}
                                 alt={person.name}
                                 onError={(e) => {
                                   e.target.style.display = 'none';

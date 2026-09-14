@@ -20,6 +20,28 @@ try:
 except ImportError:
     openpyxl = None
 
+try:
+    from backend.app.db_engine import get_db_connection, is_postgres
+    from backend.app.cloud_storage import (
+        upload_watchlist_image,
+        download_image_from_url,
+        is_cloud_storage_configured,
+    )
+except ImportError:
+    try:
+        from db_engine import get_db_connection, is_postgres
+        from cloud_storage import (
+            upload_watchlist_image,
+            download_image_from_url,
+            is_cloud_storage_configured,
+        )
+    except ImportError:
+        get_db_connection = None
+        is_postgres = lambda: False
+        upload_watchlist_image = lambda *a, **k: None
+        download_image_from_url = lambda *a, **k: False
+        is_cloud_storage_configured = lambda: False
+
 
 def get_default_db_path() -> Path:
     """Get default SQLite database path."""
@@ -51,7 +73,6 @@ def is_expired(expiry_date: Optional[str]) -> bool:
         return False
 
     clean_str = str(expiry_date).strip()
-    # Handle YYYY-MM-DD or full ISO-8601 strings
     try:
         if "T" in clean_str:
             clean_str = clean_str.split("T")[0]
@@ -70,23 +91,29 @@ def is_expired(expiry_date: Optional[str]) -> bool:
 
 def init_admin_tables(db_path: Optional[Path] = None):
     """
-    Initialize SQLite tables for watchlist personnel and authorized vehicles.
+    Initialize database tables for watchlist personnel and authorized vehicles.
+    Supports both PostgreSQL and SQLite transparently.
     Automatically seeds initial records for existing reference images and sample vehicles.
     """
     if db_path is None:
         db_path = get_default_db_path()
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
+    pg_mode = is_postgres()
+    id_type = "SERIAL PRIMARY KEY" if pg_mode else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
 
         # 1. Watchlist Personnel Table
         cursor.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS watchlist_personnel (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {id_type},
                 name TEXT UNIQUE NOT NULL,
                 role TEXT NOT NULL DEFAULT 'SSB Personnel',
                 photo_filename TEXT NOT NULL,
+                image_url TEXT,
+                face_embedding TEXT,
                 expiry_date TEXT,
                 notes TEXT,
                 created_at TEXT NOT NULL,
@@ -95,11 +122,24 @@ def init_admin_tables(db_path: Optional[Path] = None):
             """
         )
 
+        # Ensure image_url and face_embedding columns exist if table was created previously
+        try:
+            cursor.execute("ALTER TABLE watchlist_personnel ADD COLUMN image_url TEXT")
+            conn.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE watchlist_personnel ADD COLUMN face_embedding TEXT")
+            conn.commit()
+        except Exception:
+            pass
+
         # 2. Authorized Vehicles Whitelist Table
         cursor.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS authorized_vehicles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {id_type},
                 plate_number TEXT UNIQUE NOT NULL,
                 owner_name TEXT NOT NULL,
                 vehicle_type TEXT NOT NULL DEFAULT 'Patrol Vehicle',
@@ -132,13 +172,19 @@ def init_admin_tables(db_path: Optional[Path] = None):
                     stem_clean = p.stem.strip()
                     display_name = stem_clean.replace("_", " ").title()
                     role = default_roles.get(stem_clean.lower(), "SSB Personnel")
+
+                    cdn_url = None
+                    if is_cloud_storage_configured():
+                        cdn_url = upload_watchlist_image(p, public_id=stem_clean.lower())
+
                     cursor.execute(
                         """
-                        INSERT OR IGNORE INTO watchlist_personnel
-                        (name, role, photo_filename, expiry_date, notes, created_at, updated_at)
-                        VALUES (?, ?, ?, NULL, 'Pre-configured reference profile', ?, ?)
+                        INSERT INTO watchlist_personnel
+                        (name, role, photo_filename, image_url, expiry_date, notes, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, NULL, 'Pre-configured reference profile', ?, ?)
+                        ON CONFLICT (name) DO NOTHING
                         """,
-                        (display_name, role, p.name, now_iso, now_iso),
+                        (display_name, role, p.name, cdn_url, now_iso, now_iso),
                     )
             conn.commit()
 
@@ -155,13 +201,76 @@ def init_admin_tables(db_path: Optional[Path] = None):
             for plate, owner, vtype, purpose, exp, notes in default_vehicles:
                 cursor.execute(
                     """
-                    INSERT OR IGNORE INTO authorized_vehicles
+                    INSERT INTO authorized_vehicles
                     (plate_number, owner_name, vehicle_type, purpose, expiry_date, notes, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (plate_number) DO NOTHING
                     """,
                     (plate, owner, vtype, purpose, exp, notes, now_iso, now_iso),
                 )
             conn.commit()
+
+def sync_cloud_watchlist_to_disk(watchlist_dir: Optional[Path] = None, db_path: Optional[Path] = None) -> int:
+    """
+    Bidirectional sync between Cloudinary CDN and local watchlist directory:
+    1. If a profile in database has an image_url (Cloudinary CDN) and the image is missing from local disk,
+       download it so facial embeddings can be computed locally by YuNet/SFace.
+    2. If a profile has a local photo but no image_url, upload it to Cloudinary and update database record.
+    Returns number of photos restored/synced.
+    """
+    if watchlist_dir is None:
+        watchlist_dir = get_watchlist_dir()
+    watchlist_dir.mkdir(parents=True, exist_ok=True)
+
+    if db_path is None:
+        db_path = get_default_db_path()
+    init_admin_tables(db_path)
+
+    if not is_cloud_storage_configured():
+        return 0
+
+    synced_count = 0
+    try:
+        with get_db_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, photo_filename, image_url FROM watchlist_personnel")
+            records = cursor.fetchall_dicts()
+
+            for rec in records:
+                name = rec.get("name", "").strip()
+                photo_file = (rec.get("photo_filename") or "").strip()
+                image_url = rec.get("image_url")
+                if not name:
+                    continue
+
+                safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", name.lower())
+
+                # Scenario A: Has Cloudinary URL, but local file missing or empty (e.g. freshly rebuilt container)
+                if image_url and photo_file and photo_file != "default_avatar.png":
+                    target_file = watchlist_dir / photo_file
+                    if not target_file.exists() or target_file.stat().st_size < 200:
+                        print(f"[*] Restoring watchlist photo for '{name}' from Cloudinary CDN: {image_url}")
+                        ok = download_image_from_url(image_url, target_file)
+                        if ok:
+                            synced_count += 1
+
+                # Scenario B: Has local photo, but missing Cloudinary URL (e.g. added before Cloudinary was connected)
+                elif not image_url and photo_file and photo_file != "default_avatar.png":
+                    target_file = watchlist_dir / photo_file
+                    if target_file.exists() and target_file.stat().st_size >= 200:
+                        print(f"[*] Uploading un-synced watchlist photo for '{name}' to Cloudinary CDN...")
+                        cdn_url = upload_watchlist_image(target_file, public_id=safe_stem)
+                        if cdn_url:
+                            cursor.execute(
+                                "UPDATE watchlist_personnel SET image_url = ? WHERE LOWER(name) = LOWER(?)",
+                                (cdn_url, name),
+                            )
+                            conn.commit()
+                            synced_count += 1
+    except Exception as e:
+        print(f"[!] Warning during sync_cloud_watchlist_to_disk: {e}")
+
+    return synced_count
 
 
 # =====================================================================
@@ -173,16 +282,15 @@ def get_all_watchlist_personnel(db_path: Optional[Path] = None) -> List[Dict[str
         db_path = get_default_db_path()
     init_admin_tables(db_path)
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM watchlist_personnel ORDER BY name ASC")
-        rows = cursor.fetchall()
+        rows = cursor.fetchall_dicts()
         results = []
-        for r in rows:
-            d = dict(r)
+        for d in rows:
             d["is_expired"] = is_expired(d.get("expiry_date"))
-            d["photo_url"] = f"/api/admin/watchlist/photo/{d['photo_filename']}"
+            # Prefer Cloudinary CDN URL if available for permanent delivery
+            d["photo_url"] = d.get("image_url") or f"/api/admin/watchlist/photo/{d['photo_filename']}"
             results.append(d)
         return results
 
@@ -193,16 +301,14 @@ def get_watchlist_person(name: str, db_path: Optional[Path] = None) -> Optional[
         db_path = get_default_db_path()
     init_admin_tables(db_path)
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM watchlist_personnel WHERE LOWER(name) = LOWER(?)", (name.strip(),))
-        row = cursor.fetchone()
-        if not row:
+        d = cursor.fetchone_dict()
+        if not d:
             return None
-        d = dict(row)
         d["is_expired"] = is_expired(d.get("expiry_date"))
-        d["photo_url"] = f"/api/admin/watchlist/photo/{d['photo_filename']}"
+        d["photo_url"] = d.get("image_url") or f"/api/admin/watchlist/photo/{d['photo_filename']}"
         return d
 
 
@@ -234,22 +340,24 @@ def add_or_update_watchlist_person(
     name: str,
     role: str = "SSB Personnel",
     photo_filename: str = "",
+    image_url: Optional[str] = None,
+    face_embedding: Optional[str] = None,
     expiry_date: Optional[str] = None,
     notes: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Add or update an authorized person in SQLite."""
+    """Add or update an authorized person in PostgreSQL/SQLite and Cloudinary."""
     if db_path is None:
         db_path = get_default_db_path()
     init_admin_tables(db_path)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     clean_name = name.strip()
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", clean_name.lower())
+    watchlist_dir = get_watchlist_dir()
 
     photo_file = photo_filename.strip() if photo_filename else ""
     if not photo_file or photo_file.lower() in ("none", "null"):
-        safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", clean_name.lower())
-        watchlist_dir = get_watchlist_dir()
         for ext in [".png", ".jpg", ".jpeg", ".webp"]:
             if (watchlist_dir / f"{safe_stem}{ext}").exists():
                 photo_file = f"{safe_stem}{ext}"
@@ -257,23 +365,32 @@ def add_or_update_watchlist_person(
         if not photo_file:
             photo_file = "default_avatar.png"
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
+    # Auto-upload to Cloudinary if image_url is missing but local file exists
+    final_image_url = image_url
+    if not final_image_url and photo_file and photo_file != "default_avatar.png":
+        local_p = watchlist_dir / photo_file
+        if local_p.exists() and is_cloud_storage_configured():
+            final_image_url = upload_watchlist_image(local_p, public_id=safe_stem)
+
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO watchlist_personnel (name, role, photo_filename, expiry_date, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO watchlist_personnel (name, role, photo_filename, image_url, face_embedding, expiry_date, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
                 role = excluded.role,
                 photo_filename = CASE 
                     WHEN excluded.photo_filename != '' AND excluded.photo_filename != 'default_avatar.png' THEN excluded.photo_filename 
                     ELSE watchlist_personnel.photo_filename 
                 END,
+                image_url = COALESCE(excluded.image_url, watchlist_personnel.image_url),
+                face_embedding = COALESCE(excluded.face_embedding, watchlist_personnel.face_embedding),
                 expiry_date = excluded.expiry_date,
                 notes = excluded.notes,
                 updated_at = excluded.updated_at
             """,
-            (clean_name, role.strip(), photo_file, expiry_date or None, notes or None, now_iso, now_iso),
+            (clean_name, role.strip(), photo_file, final_image_url, face_embedding, expiry_date or None, notes or None, now_iso, now_iso),
         )
         conn.commit()
 
@@ -300,7 +417,7 @@ def delete_watchlist_person(name: str, db_path: Optional[Path] = None) -> bool:
             except Exception as e:
                 print(f"[!] Warning: Could not delete photo file {photo_path}: {e}")
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM watchlist_personnel WHERE LOWER(name) = LOWER(?)", (clean_name,))
         conn.commit()
@@ -317,14 +434,12 @@ def get_all_authorized_vehicles(db_path: Optional[Path] = None) -> List[Dict[str
         db_path = get_default_db_path()
     init_admin_tables(db_path)
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM authorized_vehicles ORDER BY plate_number ASC")
-        rows = cursor.fetchall()
+        rows = cursor.fetchall_dicts()
         results = []
-        for r in rows:
-            d = dict(r)
+        for d in rows:
             d["is_expired"] = is_expired(d.get("expiry_date"))
             d["normalized_plate"] = normalize_plate(d["plate_number"])
             results.append(d)
@@ -363,7 +478,7 @@ def add_or_update_authorized_vehicle(
     notes: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Add or update an authorized vehicle in SQLite."""
+    """Add or update an authorized vehicle in PostgreSQL/SQLite."""
     if db_path is None:
         db_path = get_default_db_path()
     init_admin_tables(db_path)
@@ -371,7 +486,7 @@ def add_or_update_authorized_vehicle(
     now_iso = datetime.now(timezone.utc).isoformat()
     clean_plate = plate_number.strip().upper()
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -422,7 +537,7 @@ def delete_authorized_vehicle(plate_number: str, db_path: Optional[Path] = None)
     if not exact_plate:
         return False
 
-    with sqlite3.connect(db_path, timeout=10.0) as conn:
+    with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM authorized_vehicles WHERE plate_number = ?", (exact_plate,))
         conn.commit()

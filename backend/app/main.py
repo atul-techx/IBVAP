@@ -85,6 +85,11 @@ try:
         get_watchlist_person,
         init_admin_tables,
         parse_tabular_file,
+        sync_cloud_watchlist_to_disk,
+    )
+    from backend.app.cloud_storage import (
+        upload_watchlist_image,
+        is_cloud_storage_configured,
     )
     from backend.app.replay_service import extract_incident_replay_clip, extract_event_target_crop
 except ImportError:
@@ -124,7 +129,16 @@ except ImportError:
         get_watchlist_person,
         init_admin_tables,
         parse_tabular_file,
+        sync_cloud_watchlist_to_disk,
     )
+    try:
+        from cloud_storage import (
+            upload_watchlist_image,
+            is_cloud_storage_configured,
+        )
+    except ImportError:
+        upload_watchlist_image = lambda *a, **k: None
+        is_cloud_storage_configured = lambda: False
     try:
         from replay_service import extract_incident_replay_clip, extract_event_target_crop
     except ImportError:
@@ -266,6 +280,54 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 register_event_listener(ws_manager.trigger_in_process_broadcast)
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Startup lifecycle: initialize database tables, sync Cloudinary CDN watchlist, warm face embeddings, and start background workers."""
+    print("[*] IBVAP FastAPI Backend booting up...")
+
+    # 1. Initialize SQLite / PostgreSQL Database & Admin Tables
+    try:
+        init_db()
+        print("[+] Primary events database initialized.")
+    except Exception as e:
+        print(f"[!] Warning during init_db: {e}")
+
+    try:
+        init_admin_tables()
+        print("[+] Admin management tables initialized.")
+    except Exception as e:
+        print(f"[!] Warning during init_admin_tables: {e}")
+
+    # 2. Sync Cloudinary CDN Watchlist to local container disk
+    try:
+        synced = sync_cloud_watchlist_to_disk()
+        print(f"[+] Cloud watchlist sync completed: {synced} images synced.")
+    except Exception as e:
+        print(f"[!] Cloud watchlist sync notice: {e}")
+
+    # 3. Pre-load Face Recognizer & cache embeddings in memory
+    try:
+        rec = get_active_face_recognizer(reload=True)
+        if rec and hasattr(rec, "watchlist_embeddings"):
+            print(f"[+] Face Recognizer warmed up: {len(rec.watchlist_embeddings)} identities active.")
+    except Exception as e:
+        print(f"[!] Face recognizer warmup notice: {e}")
+
+    # 4. Start WebSocket Heartbeat task
+    try:
+        asyncio.create_task(ws_manager.start_heartbeat())
+        print("[+] WebSocket keepalive heartbeat task started.")
+    except Exception as e:
+        print(f"[!] WebSocket heartbeat start notice: {e}")
+
+    # 5. Start event retention background cleaner
+    try:
+        start_event_retention_daemon(interval_seconds=600, max_age_minutes=60)
+        print("[+] Event retention daemon started.")
+    except Exception as e:
+        print(f"[!] Event retention daemon start notice: {e}")
 
 # Active background analytics stream processes: camera_id -> subprocess.Popen
 ACTIVE_STREAM_PROCESSES: dict[str, subprocess.Popen] = {}
@@ -605,6 +667,14 @@ async def add_admin_watchlist_person(
             f.write(contents)
         photo_filename = saved_filename
 
+        # Upload immediately to Cloudinary CDN for persistent cross-deployment availability
+        cloud_image_url = None
+        if is_cloud_storage_configured():
+            try:
+                cloud_image_url = upload_watchlist_image(contents, public_id=safe_stem)
+            except Exception as e:
+                print(f"[!] Warning uploading photo to Cloudinary CDN: {e}")
+
     if not photo_filename:
         safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", clean_name.lower())
         for ext in [".png", ".jpg", ".jpeg"]:
@@ -619,6 +689,7 @@ async def add_admin_watchlist_person(
         name=clean_name,
         role=role,
         photo_filename=photo_filename,
+        image_url=cloud_image_url if 'cloud_image_url' in locals() and cloud_image_url else (existing_person.get("image_url") if existing_person else None),
         expiry_date=expiry_date,
         notes=notes,
     )
@@ -737,9 +808,20 @@ def get_watchlist_template(
 
 @app.get("/api/admin/watchlist/photo/{filename}")
 def get_watchlist_photo(filename: str):
-    """Serve photo thumbnail for admin watchlist management with fallback to default avatar."""
+    """Serve photo thumbnail for admin watchlist management with fallback to Cloudinary CDN or default avatar."""
     clean_filename = Path(filename).name
     photo_path = get_watchlist_dir() / clean_filename
+
+    # If photo missing locally, attempt on-demand recovery from Cloudinary CDN
+    if not photo_path.exists() and clean_filename not in ("", "none", "default_avatar.png"):
+        try:
+            cand_name = clean_filename.rsplit(".", 1)[0].replace("_", " ")
+            person = get_watchlist_person(cand_name)
+            if person and person.get("image_url"):
+                download_image_from_url(person["image_url"], photo_path)
+        except Exception:
+            pass
+
     if not photo_path.exists() or clean_filename in ("", "none", "default_avatar.png"):
         default_path = get_watchlist_dir() / "default_avatar.png"
         if default_path.exists():
