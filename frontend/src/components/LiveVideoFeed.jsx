@@ -176,14 +176,27 @@ export default function LiveVideoFeed({
       const bw = (nx2 - nx1) * w;
       const bh = (ny2 - ny1) * h;
 
+      const isVehicle = ['car', 'bus', 'truck', 'motorcycle', 'vehicle'].includes(det.class_name?.toLowerCase());
+      const isAuthVeh = isVehicle && det.is_authorized_vehicle;
+      const isUnauthVeh = isVehicle && !det.is_authorized_vehicle;
       const isInZone = det.in_zone;
-      const boxColor = isInZone ? '#ef4444' : (det.identified_as ? '#10b981' : '#38bdf8');
+
+      let boxColor = '#38bdf8';
+      if (isAuthVeh) {
+        boxColor = '#10b981'; // Green for authorized vehicle
+      } else if (isUnauthVeh) {
+        boxColor = '#ef4444'; // Red for unauthorized vehicle
+      } else if (isInZone) {
+        boxColor = '#ef4444'; // Red for intrusion
+      } else if (det.identified_as && det.identified_as !== 'UNKNOWN') {
+        boxColor = '#10b981'; // Green for identified team member
+      }
 
       ctx.save();
       ctx.lineWidth = 2;
       ctx.strokeStyle = boxColor;
       ctx.shadowColor = boxColor;
-      ctx.shadowBlur = isInZone ? 14 : 6;
+      ctx.shadowBlur = (isInZone || isUnauthVeh) ? 14 : 6;
       ctx.strokeRect(x1, y1, bw, bh);
 
       // Corner reticles
@@ -215,10 +228,22 @@ export default function LiveVideoFeed({
       ctx.stroke();
 
       // Label Header Badge
-      const labelText = `${det.class_name.toUpperCase()} #${det.track_id} (${Math.round(det.confidence * 100)}%)${isInZone ? ' [INTRUSION]' : ''}${det.identified_as ? ` [${det.identified_as}]` : ''}`;
+      let statusTag = '';
+      if (isAuthVeh) {
+        statusTag = ` [AUTHORIZED: ${det.vehicle_owner || 'FLEET'}]`;
+      } else if (isUnauthVeh) {
+        statusTag = ' [UNAUTHORIZED VEHICLE]';
+      } else if (isInZone) {
+        statusTag = ' [INTRUSION]';
+      } else if (det.identified_as && det.identified_as !== 'UNKNOWN') {
+        statusTag = ` [${det.identified_as}]`;
+      }
+
+      const plateTag = det.plate_number ? ` [PLATE: ${det.plate_number}]` : (isVehicle ? ' [PLATE: UNVERIFIED]' : '');
+      const labelText = `${det.class_name.toUpperCase()} #${det.track_id} (${Math.round(det.confidence * 100)}%)${statusTag}${plateTag}`;
       ctx.font = 'bold 11px monospace';
       const textWidth = ctx.measureText(labelText).width;
-      ctx.fillStyle = isInZone ? 'rgba(239, 68, 68, 0.92)' : 'rgba(15, 23, 42, 0.88)';
+      ctx.fillStyle = (isInZone || isUnauthVeh) ? 'rgba(239, 68, 68, 0.92)' : (isAuthVeh ? 'rgba(16, 185, 129, 0.92)' : 'rgba(15, 23, 42, 0.88)');
       ctx.fillRect(x1, Math.max(0, y1 - 21), textWidth + 12, 20);
       ctx.strokeStyle = boxColor;
       ctx.lineWidth = 1;
@@ -226,6 +251,39 @@ export default function LiveVideoFeed({
 
       ctx.fillStyle = '#ffffff';
       ctx.fillText(labelText, x1 + 6, Math.max(14, y1 - 7));
+
+      // Draw License Plate box if vehicle
+      if (isVehicle) {
+        let px1, py1, pw, ph;
+        if (det.plate_bbox && det.plate_bbox.length === 4) {
+          px1 = det.plate_bbox[0];
+          py1 = det.plate_bbox[1];
+          pw = Math.max(20, det.plate_bbox[2] - det.plate_bbox[0]);
+          ph = Math.max(12, det.plate_bbox[3] - det.plate_bbox[1]);
+        } else {
+          px1 = x1 + bw * 0.20;
+          py1 = y1 + bh * 0.72;
+          pw = bw * 0.60;
+          ph = bh * 0.22;
+        }
+
+        const pColor = isAuthVeh ? '#10b981' : '#ef4444';
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = pColor;
+        ctx.strokeRect(px1, py1, pw, ph);
+
+        const plateBadge = det.plate_number
+          ? `PLATE: ${det.plate_number} ${isAuthVeh ? '[AUTHORIZED]' : '[UNAUTHORIZED]'}`
+          : 'PLATE: UNVERIFIED [UNAUTHORIZED]';
+
+        ctx.font = 'bold 10px monospace';
+        const pTextWidth = ctx.measureText(plateBadge).width;
+        ctx.fillStyle = isAuthVeh ? 'rgba(16, 185, 129, 0.95)' : 'rgba(239, 68, 68, 0.95)';
+        ctx.fillRect(px1, Math.max(0, py1 - 16), pTextWidth + 8, 15);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(plateBadge, px1 + 4, Math.max(11, py1 - 4));
+      }
+
       ctx.restore();
     });
   };

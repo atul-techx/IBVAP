@@ -59,6 +59,34 @@ export default function LiveAlertFeed({ events = [], onSelectEvent, isLoading = 
       );
     }
 
+    const isVehicle = ['car', 'bus', 'truck', 'motorcycle', 'vehicle'].includes(ev.object_class?.toLowerCase());
+    if (isVehicle) {
+      const isAuthVeh = ev.severity === 'low' || (ev.identified_as && ev.identified_as !== 'UNKNOWN');
+      if (isAuthVeh) {
+        return (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '4px',
+            fontSize: '0.74rem', fontWeight: 800, color: '#34d399',
+            background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.45)',
+            padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-sm)'
+          }}>
+            <ShieldCheck size={13} /> AUTHORIZED VEHICLE
+          </span>
+        );
+      } else {
+        return (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '4px',
+            fontSize: '0.74rem', fontWeight: 800, color: '#f87171',
+            background: 'rgba(239, 68, 68, 0.22)', border: '1px solid rgba(239, 68, 68, 0.5)',
+            padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-sm)'
+          }}>
+            <AlertTriangle size={13} /> UNAUTHORIZED VEHICLE
+          </span>
+        );
+      }
+    }
+
     switch (eventType) {
       case 'zone_entry':
         return (
@@ -267,13 +295,25 @@ export default function LiveAlertFeed({ events = [], onSelectEvent, isLoading = 
                       )}
 
                       {ev.plate_number ? (
-                        <span className="badge-chip plate" title="ANPR License Plate Recognized">
-                          PLATE: {ev.plate_number}
+                        <span
+                          className="badge-chip"
+                          style={
+                            ev.severity === 'low' || (ev.identified_as && ev.identified_as !== 'UNKNOWN')
+                              ? { background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.45)', fontWeight: 700 }
+                              : { background: 'rgba(239, 68, 68, 0.22)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.5)', fontWeight: 700 }
+                          }
+                          title={ev.severity === 'low' ? 'ANPR License Plate Authorized' : 'ANPR License Plate Flagged as Unauthorized'}
+                        >
+                          PLATE: {ev.plate_number} {ev.severity === 'low' || (ev.identified_as && ev.identified_as !== 'UNKNOWN') ? '[AUTHORIZED]' : '[UNAUTHORIZED]'}
                         </span>
                       ) : (
-                        ['car', 'bus', 'truck', 'motorcycle'].includes(ev.object_class?.toLowerCase()) && (
-                          <span className="badge-chip neutral" title="License plate unreadable">
-                            PLATE: UNREADABLE
+                        ['car', 'bus', 'truck', 'motorcycle', 'vehicle'].includes(ev.object_class?.toLowerCase()) && (
+                          <span
+                            className="badge-chip"
+                            style={{ background: 'rgba(239, 68, 68, 0.22)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.5)', fontWeight: 700 }}
+                            title="Vehicle License Plate Unlisted / Unauthorized"
+                          >
+                            PLATE: UNVERIFIED [UNAUTHORIZED]
                           </span>
                         )
                       )}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Video,
@@ -174,17 +175,17 @@ export default function CctvConnectModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        zIndex: 999999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(2, 6, 23, 0.82)',
-        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(2, 6, 23, 0.88)',
+        backdropFilter: 'blur(10px)',
         padding: '1rem',
       }}
       onClick={(e) => {
@@ -545,4 +546,9 @@ export default function CctvConnectModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

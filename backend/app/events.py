@@ -264,8 +264,8 @@ def generate_tactical_summary_rule_based(event: dict[str, Any]) -> str:
             if auth_veh:
                 owner_tag = f" ({auth_veh.get('owner_name', 'Authorized Fleet')})"
                 return f"Routine access: Authorized vehicle [{plate_number}]{owner_tag} entered {location}."
-            plate_tag = f", Plate: {plate_number}" if plate_number else ", Plate: UNREADABLE"
-            return f"Vehicle intrusion ({object_class.upper()} #{track_id}{plate_tag}) detected at {location} ({conf_pct}% confidence) - requires verification."
+            plate_tag = f" [Plate: {plate_number}]" if plate_number else " [Plate: UNVERIFIED]"
+            return f"High alert: UNAUTHORIZED VEHICLE intrusion ({object_class.upper()} #{track_id}{plate_tag}) detected entering {location} - verification dispatched."
         else:
             return f"Unidentified target ({object_class} #{track_id}) crossed restricted boundary at {location} ({conf_pct}% confidence)."
     elif event_type == "zone_exit":
@@ -595,9 +595,9 @@ def compute_severity(
             if auth_veh:
                 sev = "low"
             else:
-                sev = "medium"
+                sev = "high"
         else:
-            sev = "medium"
+            sev = "high"
     else:
         sev = "medium"
 
@@ -629,17 +629,34 @@ def save_snapshot(
 
     snapshot_img = frame.copy()
 
+    is_veh = object_class.lower() in ["car", "truck", "bus", "motorcycle", "vehicle"]
+    auth_v = check_authorized_vehicle(plate_number) if (is_veh and plate_number) else None
+    is_auth_veh = bool(auth_v)
+    is_auth_person = bool(identified_as and identified_as != "UNKNOWN")
+
     if bbox and len(bbox) == 4:
         x1, y1, x2, y2 = map(int, bbox)
-        cv2.rectangle(snapshot_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        tag = f"EVENT: #{track_id} {object_class}"
+        if is_auth_veh:
+            b_color = (0, 255, 120)
+            tag = f"AUTHORIZED: {auth_v.get('owner_name', object_class)}"
+        elif is_auth_person:
+            b_color = (0, 255, 120)
+            tag = f"AUTHORIZED: {identified_as}"
+        elif is_veh:
+            b_color = (0, 0, 255)
+            tag = f"UNAUTHORIZED VEHICLE: #{track_id}"
+        else:
+            b_color = (0, 0, 255)
+            tag = f"INTRUSION: #{track_id} {object_class}"
+
+        cv2.rectangle(snapshot_img, (x1, y1), (x2, y2), b_color, 2)
         cv2.putText(
             snapshot_img,
             tag,
             (x1, max(20, y1 - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (0, 0, 255),
+            b_color,
             2,
             cv2.LINE_AA,
         )
@@ -667,18 +684,22 @@ def save_snapshot(
             cv2.LINE_AA,
         )
 
-    # Draw yellow license plate box if present
+    # Draw license plate box if present
     if plate_bbox and len(plate_bbox) == 4:
         px1, py1, px2, py2 = map(int, plate_bbox)
-        cv2.rectangle(snapshot_img, (px1, py1), (px2, py2), (0, 215, 255), 2)
-        plate_label = f"PLATE: {plate_number}" if plate_number else "PLATE LOCATED"
+        p_color = (0, 255, 120) if is_auth_veh else (0, 0, 255)
+        cv2.rectangle(snapshot_img, (px1, py1), (px2, py2), p_color, 2)
+        if is_auth_veh:
+            plate_label = f"PLATE: {plate_number} [AUTHORIZED]"
+        else:
+            plate_label = f"PLATE: {plate_number or 'UNVERIFIED'} [UNAUTHORIZED]"
         cv2.putText(
             snapshot_img,
             plate_label,
             (px1, max(15, py1 - 5)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.4,
-            (0, 215, 255),
+            p_color,
             1,
             cv2.LINE_AA,
         )

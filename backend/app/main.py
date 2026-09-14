@@ -145,6 +145,36 @@ def get_active_face_recognizer(reload: bool = False):
             return None
 
 
+def run_vehicle_anpr(frame: np.ndarray, bbox: tuple, tracker_id: Optional[int] = None):
+    """Run ANPR plate reading & check authorized vehicles for client webcam frames."""
+    try:
+        from backend.app.detection_tracking import detect_and_read_license_plate, get_or_create_easyocr_reader
+    except ImportError:
+        try:
+            from detection_tracking import detect_and_read_license_plate, get_or_create_easyocr_reader
+        except ImportError:
+            return None, None, 0.0, False, None
+    try:
+        from backend.app.admin_management import check_authorized_vehicle
+    except ImportError:
+        try:
+            from admin_management import check_authorized_vehicle
+        except ImportError:
+            check_authorized_vehicle = lambda plate, db_path=None: None
+
+    reader = get_or_create_easyocr_reader()
+    p_bbox, p_text, p_conf = detect_and_read_license_plate(frame, bbox, reader, tracker_id=tracker_id)
+    is_auth = False
+    owner = None
+    if p_text:
+        auth_rec = check_authorized_vehicle(p_text)
+        if auth_rec:
+            is_auth = True
+            owner = auth_rec.get("owner_name")
+            p_text = auth_rec.get("plate_number", p_text)
+    return p_bbox, p_text, p_conf, is_auth, owner
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -1425,6 +1455,12 @@ async def process_client_frame(
                     identified_as = None
                     face_conf = 0.0
                     face_bbox = None
+                    is_auth_veh = False
+                    veh_owner = None
+                    plate_number = None
+                    plate_conf = 0.0
+                    plate_bbox = None
+
                     if cls_name == "person" and recognizer is not None:
                         try:
                             identified_as, face_conf, face_bbox = recognizer.identify_face_in_person_crop(
@@ -1432,6 +1468,20 @@ async def process_client_frame(
                             )
                         except Exception:
                             pass
+                    elif cls_name in ["car", "bus", "truck", "motorcycle", "vehicle"]:
+                        try:
+                            p_bbox, p_text, p_conf, is_auth, owner = run_vehicle_anpr(
+                                frame, (x1, y1, x2, y2), tracker_id=track_id
+                            )
+                            plate_bbox = p_bbox
+                            plate_number = p_text
+                            plate_conf = p_conf
+                            is_auth_veh = is_auth
+                            veh_owner = owner
+                            if is_auth and owner:
+                                identified_as = owner
+                        except Exception as anpr_e:
+                            print(f"[!] ANPR client frame error: {anpr_e}")
 
                     detections.append({
                         "class_name": cls_name,
@@ -1448,6 +1498,11 @@ async def process_client_frame(
                         "identified_as": identified_as,
                         "face_confidence": round(face_conf, 2) if face_conf else None,
                         "face_bbox": face_bbox,
+                        "plate_number": plate_number,
+                        "plate_confidence": round(plate_conf, 2) if plate_conf else None,
+                        "plate_bbox": plate_bbox,
+                        "is_authorized_vehicle": is_auth_veh,
+                        "vehicle_owner": veh_owner,
                     })
         except Exception as det_err:
             print(f"[!] Warning running client YOLO detection: {det_err}")
@@ -1470,7 +1525,7 @@ async def process_client_frame(
             det_track = primary_det["track_id"] if primary_det else 1
             det_bbox = [float(v) for v in primary_det["bbox"]] if primary_det else [0.0, 0.0, float(width), float(height)]
             det_conf = primary_det["confidence"] if primary_det else 0.85
-            ident = primary_det.get("identified_as") if primary_det else None
+            ident = primary_det.get("vehicle_owner") if primary_det.get("is_authorized_vehicle") else primary_det.get("identified_as")
             log_event_async(
                 camera_id=req.camera_id,
                 event_type="zone_entry",
@@ -1481,6 +1536,9 @@ async def process_client_frame(
                 confidence=det_conf,
                 frame=frame,
                 identified_as=ident,
+                plate_number=primary_det.get("plate_number"),
+                plate_confidence=primary_det.get("plate_confidence"),
+                plate_bbox=primary_det.get("plate_bbox"),
                 source_video="live_browser_webcam",
             )
 
