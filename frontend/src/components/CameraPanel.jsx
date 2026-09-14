@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Camera, Play, Radio, CheckCircle2, Shield, AlertCircle, Loader2 } from 'lucide-react';
+import { Camera, Play, Radio, CheckCircle2, Shield, AlertCircle, Loader2, Plus } from 'lucide-react';
 import { triggerPipeline } from '../services/api';
+import CctvConnectModal from './CctvConnectModal';
 
 export default function CameraPanel({
   cameras = [],
@@ -10,6 +11,7 @@ export default function CameraPanel({
 }) {
   const [isRunning, setIsRunning] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState('');
+  const [isCctvModalOpen, setIsCctvModalOpen] = useState(false);
 
   const validCameras = (cameras || []).filter(
     (c) => c?.camera_id && !c.camera_id.toUpperCase().startsWith('SYSTEM') && !c.camera_id.toUpperCase().startsWith('AUTH')
@@ -35,21 +37,44 @@ export default function CameraPanel({
 
   return (
     <div className="panel-card" role="region" aria-label="Camera Management Panel">
-      <div className="panel-header">
+      <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="panel-title">
           <Camera size={18} style={{ color: 'var(--color-cyan)' }} />
           Border Sector Cameras
         </div>
-        <span
-          className="badge-tag"
-          style={{
-            background: 'rgba(16, 185, 129, 0.15)',
-            color: '#34d399',
-            border: '1px solid rgba(16, 185, 129, 0.35)',
-          }}
-        >
-          {physicalCamerasCount} PHYSICAL CAM / {validCameras.length || 4} SECTORS
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <button
+            onClick={() => setIsCctvModalOpen(true)}
+            style={{
+              background: 'rgba(14, 165, 233, 0.16)',
+              border: '1px solid #38bdf8',
+              color: '#38bdf8',
+              padding: '0.22rem 0.65rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              transition: 'all 0.15s ease',
+            }}
+            title="Connect external IP camera or RTSP CCTV stream"
+          >
+            <Plus size={13} />
+            <span>+ Connect CCTV</span>
+          </button>
+          <span
+            className="badge-tag"
+            style={{
+              background: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+            }}
+          >
+            {physicalCamerasCount} PHYSICAL CAM / {validCameras.length || 4} SECTORS
+          </span>
+        </div>
       </div>
 
       <div className="camera-list-container">
@@ -191,6 +216,16 @@ export default function CameraPanel({
           <div>&bull; Virtual Fence: Polygon α Zone Geometry</div>
         </div>
       </div>
+
+      <CctvConnectModal
+        isOpen={isCctvModalOpen}
+        onClose={() => setIsCctvModalOpen(false)}
+        initialCameraId={selectedCameraId || 'CAM_03'}
+        onCameraConnected={(camId) => {
+          if (onSelectCamera) onSelectCamera(camId);
+          if (onPipelineTriggered) onPipelineTriggered();
+        }}
+      />
     </div>
   );
 }

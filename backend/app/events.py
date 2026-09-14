@@ -16,10 +16,11 @@ import sqlite3
 import urllib.request
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import queue
 import threading
+import time
 from typing import Any, Callable, List, Literal, Optional
 import cv2
 import numpy as np
@@ -1426,3 +1427,134 @@ def print_database_summary(db_path: Optional[Path] = None):
 
     print("=" * 90)
     print(f" Total Stored Security Events: {len(events)}\n")
+
+
+def purge_expired_events(max_age_minutes: int = 30, db_path: Optional[Path] = None) -> dict[str, Any]:
+    """
+    Purge historical security events older than max_age_minutes (default: 30 minutes).
+    - Removes associated snapshot image files from disk (backend/snapshots/).
+    - Deletes event records from SQLite 'events' table.
+    - Runs PRAGMA wal_checkpoint(TRUNCATE) to reclaim disk space.
+    Returns summary dict of purged records and deleted files.
+    """
+    if db_path is None:
+        db_path = get_default_db_path()
+
+    if not db_path.exists():
+        return {
+            "status": "success",
+            "purged_events_count": 0,
+            "deleted_snapshots_count": 0,
+            "max_age_minutes": max_age_minutes,
+            "reclaimed": False,
+        }
+
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    cutoff_iso = cutoff_dt.isoformat()
+    snapshots_dir = get_snapshots_dir()
+
+    purged_events_count = 0
+    deleted_snapshots_count = 0
+
+    try:
+        with sqlite3.connect(db_path, timeout=15.0) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Identify events older than cutoff
+            cursor.execute(
+                "SELECT event_id, snapshot_path FROM events WHERE timestamp < ?",
+                (cutoff_iso,)
+            )
+            expired_rows = cursor.fetchall()
+
+            for row in expired_rows:
+                event_id = row["event_id"]
+                snap_path_str = row["snapshot_path"]
+                # Attempt to delete file from snapshot_path or default snapshots directory
+                paths_to_check = []
+                if snap_path_str:
+                    paths_to_check.append(Path(snap_path_str))
+                if event_id:
+                    paths_to_check.append(snapshots_dir / f"{event_id}.jpg")
+
+                for p in paths_to_check:
+                    try:
+                        if p.exists() and p.is_file():
+                            p.unlink(missing_ok=True)
+                            deleted_snapshots_count += 1
+                            break
+                    except Exception:
+                        pass
+
+            # Delete rows from SQLite
+            cursor.execute("DELETE FROM events WHERE timestamp < ?", (cutoff_iso,))
+            purged_events_count = cursor.rowcount if cursor.rowcount is not None else len(expired_rows)
+            conn.commit()
+
+            # Reclaim SQLite WAL disk pages
+            try:
+                cursor.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            except Exception:
+                pass
+
+        return {
+            "status": "success",
+            "purged_events_count": purged_events_count,
+            "deleted_snapshots_count": deleted_snapshots_count,
+            "cutoff_timestamp": cutoff_iso,
+            "max_age_minutes": max_age_minutes,
+            "reclaimed": True,
+        }
+    except Exception as e:
+        print(f"[!] Error in purge_expired_events: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "purged_events_count": purged_events_count,
+            "deleted_snapshots_count": deleted_snapshots_count,
+            "max_age_minutes": max_age_minutes,
+        }
+
+
+_retention_daemon_started = False
+_retention_daemon_lock = threading.Lock()
+
+
+def start_event_retention_daemon(
+    interval_seconds: int = 300,
+    max_age_minutes: int = 30,
+    db_path: Optional[Path] = None,
+):
+    """
+    Launch a background daemon thread that periodically purges events older than max_age_minutes.
+    Runs once every interval_seconds (default: 300s / 5 minutes).
+    """
+    global _retention_daemon_started
+    with _retention_daemon_lock:
+        if _retention_daemon_started:
+            return
+        _retention_daemon_started = True
+
+    def _daemon_loop():
+        print(f"[+] Event Retention Daemon started (Check every {interval_seconds}s, Purge > {max_age_minutes}m).")
+        # Run an initial purge on startup
+        try:
+            res = purge_expired_events(max_age_minutes=max_age_minutes, db_path=db_path)
+            if res.get("purged_events_count", 0) > 0:
+                print(f"[Retention Daemon] Startup purge removed {res['purged_events_count']} events, {res['deleted_snapshots_count']} snapshots.")
+        except Exception as e:
+            print(f"[Retention Daemon] Error on initial purge: {e}")
+
+        while True:
+            try:
+                time.sleep(interval_seconds)
+                res = purge_expired_events(max_age_minutes=max_age_minutes, db_path=db_path)
+                if res.get("purged_events_count", 0) > 0:
+                    print(f"[Retention Daemon] Periodic purge removed {res['purged_events_count']} events, {res['deleted_snapshots_count']} snapshots.")
+            except Exception as e:
+                print(f"[Retention Daemon] Error during cycle: {e}")
+
+    t = threading.Thread(target=_daemon_loop, daemon=True, name="IBVAP-RetentionDaemon")
+    t.start()
+

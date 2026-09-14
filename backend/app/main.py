@@ -58,7 +58,9 @@ try:
         heartbeat_camera,
         init_db,
         log_auth_event,
+        purge_expired_events,
         register_event_listener,
+        start_event_retention_daemon,
         verify_chain_integrity,
     )
     from backend.app.auth import (
@@ -95,7 +97,9 @@ except ImportError:
         heartbeat_camera,
         init_db,
         log_auth_event,
+        purge_expired_events,
         register_event_listener,
+        start_event_retention_daemon,
         verify_chain_integrity,
     )
     from auth import (
@@ -305,7 +309,18 @@ def launch_analytics_stream(
     if not show_zone:
         cmd.append("--no-zone")
 
-    if source_type == "webcam" or source == "0":
+    is_network = (
+        source_type == "rtsp"
+        or (isinstance(source, str) and (
+            source.startswith("rtsp://")
+            or source.startswith("http://")
+            or source.startswith("https://")
+        ))
+    )
+
+    if is_network:
+        cmd.extend(["--input", str(source)])
+    elif source_type == "webcam" or source == "0":
         # Fast non-blocking check: Linux cloud containers do not have /dev/video0
         if sys.platform != "win32":
             can_open_webcam = os.path.exists("/dev/video0")
@@ -389,9 +404,13 @@ def ensure_default_stream_running(camera_id: str = "CAM_01"):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup, launch keepalive heartbeat task, and auto-start surveillance loop."""
+    """Initialize database on startup, launch keepalive heartbeat task, auto-start surveillance loop, and begin event retention daemon."""
     init_db()
     asyncio.create_task(ws_manager.start_heartbeat())
+    try:
+        start_event_retention_daemon(interval_seconds=300, max_age_minutes=30)
+    except Exception as e:
+        print(f"[!] Warning: Could not start event retention daemon: {e}")
     try:
         ensure_default_stream_running(camera_id="CAM_01")
         print("[+] IBVAP Surveillance Pipeline auto-started for CAM_01 (Loop mode).")
@@ -826,6 +845,19 @@ def get_events(
         "count": len(events),
         "events": events,
     }
+
+
+@app.post("/api/events/purge")
+def purge_events_endpoint(
+    max_age_minutes: int = Query(30, ge=1, le=1440, description="Purge events older than this number of minutes"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Purge historical security events older than max_age_minutes (default: 30 minutes).
+    Deletes SQLite records and removes associated image snapshots to reclaim disk space.
+    """
+    res = purge_expired_events(max_age_minutes=max_age_minutes)
+    return res
 
 
 @app.get("/api/audit/verify")
@@ -1278,6 +1310,8 @@ class StreamControlRequest(BaseModel):
     source_type: str = "test_video"  # "webcam" | "test_video" | "rtsp"
     imgsz: int = 480
     show_zone: bool = True
+    camera_name: Optional[str] = None
+    location: Optional[str] = None
 
 
 class ClientFrameRequest(BaseModel):
@@ -1519,6 +1553,17 @@ async def start_camera_stream(
     """
     cam_id = req.camera_id or "CAM_01"
     MANUALLY_STOPPED_CAMERAS.discard(cam_id)
+    if req.camera_name or req.location:
+        try:
+            heartbeat_camera(
+                camera_id=cam_id,
+                name=req.camera_name or f"CCTV {cam_id}",
+                location=req.location or f"Sector Gate ({cam_id})",
+                resolution="1280x720",
+                fps=30.0,
+            )
+        except Exception:
+            pass
     proc = launch_analytics_stream(
         camera_id=cam_id,
         source_type=req.source_type,

@@ -157,6 +157,21 @@ export default function LiveAlertFeed({ events = [], onSelectEvent, isLoading = 
           Live Perimeter Threat Feed
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          <span
+            style={{
+              fontSize: '0.66rem',
+              padding: '0.15rem 0.45rem',
+              borderRadius: '4px',
+              background: 'rgba(14, 165, 233, 0.12)',
+              color: '#38bdf8',
+              border: '1px solid rgba(14, 165, 233, 0.3)',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+            }}
+            title="Rolling automatic database & snapshot cleanup runs continuously for lightweight storage"
+          >
+            30-MIN AUTO-PURGE ACTIVE
+          </span>
           <Sparkles size={14} style={{ color: '#0ea5e9' }} />
           <span>Real-Time Stream ({events.length} Events)</span>
         </div>

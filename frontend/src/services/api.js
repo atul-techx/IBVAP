@@ -200,12 +200,23 @@ export async function startStream(cameraId = 'CAM_01', options = {}) {
       source_type: options.sourceType || 'webcam',
       imgsz: options.imgsz || (options.sourceType === 'webcam' ? 384 : 480),
       show_zone: options.showZone !== undefined ? options.showZone : true,
+      camera_name: options.cameraName || options.camera_name,
+      location: options.location,
     }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || err.message || 'Failed to start camera stream');
   }
+  return res.json();
+}
+
+export async function purgeEvents(maxAgeMinutes = 30) {
+  const res = await fetch(`${API_BASE}/api/events/purge?max_age_minutes=${maxAgeMinutes}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to purge expired events');
   return res.json();
 }
 

@@ -21,6 +21,7 @@ import {
   FlipHorizontal,
   VideoOff,
   CameraOff,
+  Plus,
 } from 'lucide-react';
 import {
   getLiveFeedUrl,
@@ -32,6 +33,7 @@ import {
   processClientFrame,
 } from '../services/api';
 import voiceAlertService from '../services/voiceAlertService';
+import CctvConnectModal from './CctvConnectModal';
 
 export default function LiveVideoFeed({
   cameraId = 'CAM_01',
@@ -42,6 +44,7 @@ export default function LiveVideoFeed({
   lastEventTime = null,
 }) {
   const [streamKey, setStreamKey] = useState(Date.now());
+  const [isCctvModalOpen, setIsCctvModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -1195,6 +1198,27 @@ export default function LiveVideoFeed({
               }}
             >
               <button
+                onClick={() => setIsCctvModalOpen(true)}
+                style={{
+                  background: 'linear-gradient(135deg, #0284c7, #0ea5e9)',
+                  border: '1px solid #38bdf8',
+                  color: '#ffffff',
+                  padding: '0.6rem 1.3rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 0 20px rgba(14, 165, 233, 0.4)',
+                }}
+                title="Connect physical CCTV or 1-click cloud test stream to this sector"
+              >
+                <Plus size={16} />
+                <span>+ Connect CCTV Camera to this Sector</span>
+              </button>
+              <button
                 onClick={() => onSelectCamera?.('CAM_01')}
                 style={{
                   background: 'linear-gradient(135deg, #0284c7, #0369a1)',
@@ -1459,6 +1483,18 @@ export default function LiveVideoFeed({
           </span>
         </div>
       </div>
+
+      <CctvConnectModal
+        isOpen={isCctvModalOpen}
+        onClose={() => setIsCctvModalOpen(false)}
+        initialCameraId={cameraId}
+        onCameraConnected={(camId) => {
+          setManuallyStopped(false);
+          setStreamMode('mjpeg');
+          setStreamKey(Date.now());
+          if (onSelectCamera) onSelectCamera(camId);
+        }}
+      />
     </div>
   );
 }
