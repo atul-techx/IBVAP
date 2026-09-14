@@ -19,6 +19,8 @@ import {
   CheckCircle,
   Clock,
   FlipHorizontal,
+  VideoOff,
+  CameraOff,
 } from 'lucide-react';
 import {
   getLiveFeedUrl,
@@ -48,9 +50,9 @@ export default function LiveVideoFeed({
   const [availableVideos, setAvailableVideos] = useState([]);
   const [selectedVideo, setSelectedVideo] = useState('sample.mp4');
   const [isControllingStream, setIsControllingStream] = useState(false);
-  const [streamMode, setStreamMode] = useState('mjpeg'); // 'mjpeg' | 'fallback_frame' | 'browser_webcam'
+  const [streamMode, setStreamMode] = useState('browser_webcam'); // 'browser_webcam' | 'mjpeg' | 'fallback_frame' | 'no_physical_camera'
   const [showZone, setShowZone] = useState(true);
-  const [activeSourceType, setActiveSourceType] = useState('test_video'); // 'test_video' | 'browser_webcam'
+  const [activeSourceType, setActiveSourceType] = useState('browser_webcam');
   const [manuallyStopped, setManuallyStopped] = useState(false);
   const [fallbackFrameUrl, setFallbackFrameUrl] = useState('');
   const [webcamError, setWebcamError] = useState(null);
@@ -69,6 +71,8 @@ export default function LiveVideoFeed({
   const showZoneRef = useRef(showZone);
   showZoneRef.current = showZone;
 
+  const isPhysicalCamera = cameraId === 'CAM_01' || cameraId === 'CAM_02';
+
   const feedUrl = `${getLiveFeedUrl(cameraId)}?v=${streamKey}`;
 
   const validCameras = (cameras || []).filter(
@@ -76,7 +80,11 @@ export default function LiveVideoFeed({
   );
 
   const isProcessRunning = streamProcesses[cameraId]?.running || false;
-  const isCamOnline = !manuallyStopped && (streamMode === 'browser_webcam' || isProcessRunning || (validCameras.find((c) => c.camera_id === cameraId)?.status === 'online'));
+  const isCamOnline = !manuallyStopped && (
+    isPhysicalCamera
+      ? (streamMode === 'browser_webcam' && !webcamError)
+      : (streamMode === 'mjpeg' && isProcessRunning)
+  );
 
   // Helper to cleanly terminate browser webcam hardware tracks
   const stopBrowserWebcamTracks = () => {
@@ -317,15 +325,35 @@ export default function LiveVideoFeed({
     fps: 0.0,
   };
 
-  // Reset loading state and gracefully clear error when switching camera
+  // Handle switching camera sectors: keep live camera connected on Sector 1 & 2, show offline on others
   useEffect(() => {
-    stopBrowserWebcamTracks();
     setIsLoaded(false);
     setHasError(false);
-    setManuallyStopped(false);
-    setStreamMode('mjpeg');
-    setActiveSourceType('test_video');
-    setStreamKey(Date.now());
+
+    if (isPhysicalCamera) {
+      setManuallyStopped(false);
+      setStreamMode('browser_webcam');
+      setActiveSourceType('browser_webcam');
+
+      if (webcamStreamRef.current && webcamStreamRef.current.active) {
+        if (webcamVideoRef.current && webcamVideoRef.current.srcObject !== webcamStreamRef.current) {
+          webcamVideoRef.current.srcObject = webcamStreamRef.current;
+          webcamVideoRef.current.play().catch(() => {});
+        }
+        setIsLoaded(true);
+        startClientAiLoop();
+      } else {
+        handleStartWebcam();
+      }
+    } else {
+      if (webcamIntervalRef.current) {
+        clearInterval(webcamIntervalRef.current);
+        webcamIntervalRef.current = null;
+      }
+      setStreamMode('no_physical_camera');
+      setActiveSourceType('no_physical_camera');
+      setIsLoaded(true);
+    }
   }, [cameraId]);
 
   // Clean up browser webcam tracks on component unmount
@@ -335,7 +363,7 @@ export default function LiveVideoFeed({
     };
   }, []);
 
-  // Gracefully transition out the loader after 700ms so MJPEG stream is never hidden behind spinner
+  // Gracefully transition out the loader after 700ms so stream is never hidden behind spinner
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoaded(true);
@@ -361,7 +389,10 @@ export default function LiveVideoFeed({
 
   // 1-Click Launch or Switch Surveillance Video Feed (Continuous Loop)
   const handleStartVideoFeed = async (videoFilename = selectedVideo) => {
-    stopBrowserWebcamTracks();
+    if (webcamIntervalRef.current) {
+      clearInterval(webcamIntervalRef.current);
+      webcamIntervalRef.current = null;
+    }
     setActiveSourceType('test_video');
     setManuallyStopped(false);
     setIsControllingStream(true);
@@ -392,6 +423,22 @@ export default function LiveVideoFeed({
 
   // Launch Real Browser Device Webcam with Live AI Border Surveillance Analytics
   const handleStartWebcam = async () => {
+    if (webcamStreamRef.current && webcamStreamRef.current.active) {
+      setActiveSourceType('browser_webcam');
+      setStreamMode('browser_webcam');
+      setManuallyStopped(false);
+      setIsControllingStream(false);
+      setHasError(false);
+      setWebcamError(null);
+      setIsLoaded(true);
+      if (webcamVideoRef.current && webcamVideoRef.current.srcObject !== webcamStreamRef.current) {
+        webcamVideoRef.current.srcObject = webcamStreamRef.current;
+        webcamVideoRef.current.play().catch(() => {});
+      }
+      startClientAiLoop();
+      return;
+    }
+
     stopBrowserWebcamTracks();
     stopStream(cameraId).catch(() => {});
 
@@ -440,18 +487,10 @@ export default function LiveVideoFeed({
     }
   };
 
-  // Auto-start Demo Surveillance Loop on initial system launch
+  // Auto-start Physical Camera on initial system launch for Sector 01
   useEffect(() => {
-    if (cameraId === 'CAM_01' && !manuallyStopped) {
-      fetchStreamStatus()
-        .then((status) => {
-          if (!status?.CAM_01?.running) {
-            handleStartVideoFeed('sample.mp4');
-          }
-        })
-        .catch(() => {
-          handleStartVideoFeed('sample.mp4');
-        });
+    if (isPhysicalCamera) {
+      handleStartWebcam();
     }
   }, []);
 
@@ -570,7 +609,7 @@ export default function LiveVideoFeed({
         </div>
         {validCameras.map((cam) => {
           const isSelected = cam.camera_id === cameraId;
-          const isRunning = streamProcesses[cam.camera_id]?.running ?? (isSelected ? !manuallyStopped : false);
+          const isPhys = cam.camera_id === 'CAM_01' || cam.camera_id === 'CAM_02';
           return (
             <button
               key={cam.camera_id}
@@ -582,15 +621,21 @@ export default function LiveVideoFeed({
                 gap: '0.45rem',
                 padding: '0.35rem 0.85rem',
                 borderRadius: 'var(--radius-sm)',
-                border: isSelected ? '1.5px solid #0ea5e9' : '1px solid rgba(148, 163, 184, 0.2)',
-                background: isSelected ? 'rgba(14, 165, 233, 0.25)' : 'rgba(15, 23, 42, 0.55)',
-                color: isSelected ? '#38bdf8' : '#94a3b8',
+                border: isSelected
+                  ? (isPhys ? '1.5px solid #10b981' : '1.5px solid #f59e0b')
+                  : '1px solid rgba(148, 163, 184, 0.2)',
+                background: isSelected
+                  ? (isPhys ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)')
+                  : 'rgba(15, 23, 42, 0.55)',
+                color: isSelected ? (isPhys ? '#34d399' : '#fbbf24') : '#94a3b8',
                 fontSize: '0.8rem',
                 fontWeight: isSelected ? 800 : 500,
                 cursor: 'pointer',
                 transition: 'all 0.18s ease',
                 whiteSpace: 'nowrap',
-                boxShadow: isSelected ? '0 0 10px rgba(14, 165, 233, 0.3)' : 'none',
+                boxShadow: isSelected
+                  ? (isPhys ? '0 0 10px rgba(16, 185, 129, 0.35)' : '0 0 10px rgba(245, 158, 11, 0.35)')
+                  : 'none',
               }}
             >
               <span
@@ -598,11 +643,25 @@ export default function LiveVideoFeed({
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  backgroundColor: isRunning ? '#10b981' : '#64748b',
-                  boxShadow: isRunning ? '0 0 6px #10b981' : 'none',
+                  backgroundColor: isPhys ? '#10b981' : '#f59e0b',
+                  boxShadow: isPhys ? '0 0 6px #10b981' : 'none',
                 }}
               />
               <span>{cam.name || cam.camera_id}</span>
+              <span
+                style={{
+                  fontSize: '0.62rem',
+                  padding: '0.1rem 0.35rem',
+                  borderRadius: '3px',
+                  background: isPhys ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                  color: isPhys ? '#34d399' : '#fbbf24',
+                  fontWeight: 700,
+                  marginLeft: '0.25rem',
+                  letterSpacing: '0.03em',
+                }}
+              >
+                {isPhys ? 'PHYSICAL CAM' : 'NO SENSOR'}
+              </span>
             </button>
           );
         })}
@@ -611,9 +670,17 @@ export default function LiveVideoFeed({
       {/* Feed Panel Header */}
       <div className="card-header live-feed-header" style={{ padding: '0.75rem 1.1rem' }}>
         <div className="live-feed-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div className={`status-indicator ${isCamOnline ? 'online' : 'standby'}`}>
-            <span className="pulse-dot" />
-            {isCamOnline ? 'SURVEILLANCE ACTIVE' : 'STANDBY'}
+          <div
+            className={`status-indicator ${isPhysicalCamera ? (isCamOnline ? 'online' : 'standby') : 'offline'}`}
+            style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { borderColor: '#f59e0b', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.12)' } : {}}
+          >
+            <span
+              className="pulse-dot"
+              style={!isPhysicalCamera && streamMode === 'no_physical_camera' ? { background: '#fbbf24', boxShadow: '0 0 8px #fbbf24' } : {}}
+            />
+            {isPhysicalCamera
+              ? (isCamOnline ? 'SURVEILLANCE ACTIVE // LIVE CAM' : 'STANDBY')
+              : (streamMode === 'no_physical_camera' ? 'NO PHYSICAL CAMERA' : 'SIMULATION STREAM')}
           </div>
 
           {/* Camera Selector Dropdown */}
@@ -1003,6 +1070,183 @@ export default function LiveVideoFeed({
               </div>
             )}
           </div>
+        ) : streamMode === 'no_physical_camera' ? (
+          <div
+            className="no-physical-camera-container"
+            style={{
+              position: 'relative',
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'radial-gradient(circle at center, #0f172a 0%, #020617 100%)',
+              padding: '2rem 1.5rem',
+              textAlign: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Tactical Grid Scan Pattern */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage:
+                  'linear-gradient(rgba(245, 158, 11, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(245, 158, 11, 0.05) 1px, transparent 1px)',
+                backgroundSize: '28px 28px',
+                pointerEvents: 'none',
+              }}
+            />
+
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: '50%',
+                background: 'rgba(245, 158, 11, 0.12)',
+                border: '1.5px solid rgba(245, 158, 11, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1rem',
+                boxShadow: '0 0 25px rgba(245, 158, 11, 0.2)',
+                position: 'relative',
+                zIndex: 1,
+              }}
+            >
+              <VideoOff size={36} style={{ color: '#fbbf24' }} />
+            </div>
+
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                background: 'rgba(245, 158, 11, 0.15)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: '9999px',
+                padding: '0.25rem 0.85rem',
+                color: '#fbbf24',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                marginBottom: '0.75rem',
+                fontFamily: 'var(--font-mono)',
+                position: 'relative',
+                zIndex: 1,
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#f59e0b',
+                  boxShadow: '0 0 8px #f59e0b',
+                }}
+              />
+              SECTOR SENSOR DISCONNECTED
+            </div>
+
+            <h3
+              style={{
+                color: '#f8fafc',
+                fontSize: '1.28rem',
+                fontWeight: 800,
+                marginBottom: '0.5rem',
+                position: 'relative',
+                zIndex: 1,
+                letterSpacing: '0.02em',
+              }}
+            >
+              Physical camera connect nahi hai es field me abhi
+            </h3>
+
+            <p
+              style={{
+                color: '#94a3b8',
+                fontSize: '0.88rem',
+                maxWidth: 520,
+                lineHeight: 1.55,
+                marginBottom: '1.5rem',
+                position: 'relative',
+                zIndex: 1,
+              }}
+            >
+              Hardware sensor for <strong>{currentCam?.name || cameraId}</strong> is currently unmapped. Live optical surveillance is linked with your hardware camera on <strong>Sector 01 Gate</strong> & <strong>Sector 02 East Fence</strong>. Switch to them to monitor with your live camera.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                justifyContent: 'center',
+                position: 'relative',
+                zIndex: 1,
+              }}
+            >
+              <button
+                onClick={() => onSelectCamera?.('CAM_01')}
+                style={{
+                  background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                  border: '1px solid #38bdf8',
+                  color: '#ffffff',
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 0 16px rgba(14, 165, 233, 0.35)',
+                }}
+              >
+                <Video size={15} />
+                <span>Switch to Sector 01 (Live Cam)</span>
+              </button>
+              <button
+                onClick={() => onSelectCamera?.('CAM_02')}
+                style={{
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  border: '1px solid #10b981',
+                  color: '#34d399',
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                <Video size={15} />
+                <span>Switch to Sector 02 (Live Cam)</span>
+              </button>
+              <button
+                onClick={() => handleStartVideoFeed(selectedVideo)}
+                style={{
+                  background: 'rgba(30, 41, 59, 0.8)',
+                  border: '1px solid #475569',
+                  color: '#cbd5e1',
+                  padding: '0.6rem 1.15rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 600,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                <Play size={14} />
+                <span>Play Simulation Scenario</span>
+              </button>
+            </div>
+          </div>
         ) : streamMode === 'mjpeg' ? (
           <img
             key={streamKey}
@@ -1038,12 +1282,29 @@ export default function LiveVideoFeed({
         {/* Stream Overlay HUD (Top Bar) */}
         <div className="viewport-hud top" style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', background: 'rgba(3, 7, 18, 0.75)', padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-sm)', backdropFilter: 'blur(8px)' }}>
           <div className="hud-metric">
-            <span className="rec-dot" style={manuallyStopped ? { background: '#64748b', boxShadow: 'none' } : {}} />
-            <span className="hud-label" style={{ color: manuallyStopped ? '#94a3b8' : '#f87171', fontWeight: 800 }}>
-              {manuallyStopped ? 'STANDBY' : 'LIVE'}
+            <span
+              className="rec-dot"
+              style={
+                streamMode === 'no_physical_camera'
+                  ? { background: '#f59e0b', boxShadow: 'none' }
+                  : manuallyStopped
+                  ? { background: '#64748b', boxShadow: 'none' }
+                  : {}
+              }
+            />
+            <span
+              className="hud-label"
+              style={{
+                color: streamMode === 'no_physical_camera' ? '#fbbf24' : manuallyStopped ? '#94a3b8' : '#f87171',
+                fontWeight: 800,
+              }}
+            >
+              {streamMode === 'no_physical_camera' ? 'DISCONNECTED' : manuallyStopped ? 'STANDBY' : 'LIVE'}
             </span>
             <span className="hud-val">
-              {manuallyStopped
+              {streamMode === 'no_physical_camera'
+                ? 'NO HARDWARE SENSOR'
+                : manuallyStopped
                 ? 'STREAM PAUSED'
                 : (streamMode === 'browser_webcam' ? 'DEVICE WEBCAM // YOLOv8' : 'YOLOv8 + BYTETRACK')}
             </span>
@@ -1054,17 +1315,19 @@ export default function LiveVideoFeed({
             <span className="hud-val">{showZone ? 'POLYGON α' : 'MUTED'}</span>
           </div>
           <div className="hud-metric">
-            <Users size={12} style={{ color: manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399') }} />
+            <Users size={12} style={{ color: streamMode === 'no_physical_camera' ? '#94a3b8' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399') }} />
             <span className="hud-label">STATUS:</span>
             <span
               className="hud-val"
               style={{
-                color: manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399'),
+                color: streamMode === 'no_physical_camera' ? '#fbbf24' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399'),
                 fontWeight: 800,
                 letterSpacing: '0.04em',
               }}
             >
-              {manuallyStopped
+              {streamMode === 'no_physical_camera'
+                ? 'SENSOR OFFLINE'
+                : manuallyStopped
                 ? 'CAMERA OFF'
                 : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0)
                   ? `INTRUSION (${streamMode === 'browser_webcam' ? (clientTelemetry.occupancy || 1) : camTelemetry.occupancy})`
@@ -1092,15 +1355,23 @@ export default function LiveVideoFeed({
             color: '#94a3b8',
           }}
         >
-          <span style={{ color: manuallyStopped ? '#64748b' : '#38bdf8', fontWeight: 700 }}>
-            {manuallyStopped
+          <span style={{ color: streamMode === 'no_physical_camera' ? '#f59e0b' : manuallyStopped ? '#64748b' : '#38bdf8', fontWeight: 700 }}>
+            {streamMode === 'no_physical_camera'
+              ? '0.0 OFFLINE'
+              : manuallyStopped
               ? '0.0'
               : (streamMode === 'browser_webcam'
                 ? (clientTelemetry.fps ? clientTelemetry.fps.toFixed(1) : '30.0')
                 : (camTelemetry.fps ? camTelemetry.fps.toFixed(1) : '30.0'))} FPS
           </span>
           <span style={{ color: '#64748b' }}>|</span>
-          <span>{manuallyStopped ? 'PAUSED' : (streamMode === 'browser_webcam' ? 'LIVE CAMERA' : 'LOOP ACTIVE')}</span>
+          <span>
+            {streamMode === 'no_physical_camera'
+              ? 'UNMAPPED SENSOR'
+              : manuallyStopped
+              ? 'PAUSED'
+              : (streamMode === 'browser_webcam' ? 'LIVE CAMERA' : 'LOOP ACTIVE')}
+          </span>
         </div>
 
         {/* Fallback Display if stream disconnects */}

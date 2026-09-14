@@ -14,7 +14,7 @@ export default function CameraPanel({
   const validCameras = (cameras || []).filter(
     (c) => c?.camera_id && !c.camera_id.toUpperCase().startsWith('SYSTEM') && !c.camera_id.toUpperCase().startsWith('AUTH')
   );
-  const onlineCount = validCameras.filter((c) => c.status === 'online').length;
+  const physicalCamerasCount = validCameras.filter(c => c.camera_id === 'CAM_01' || c.camera_id === 'CAM_02').length;
 
   const handleRunDemo = async () => {
     setIsRunning(true);
@@ -43,12 +43,12 @@ export default function CameraPanel({
         <span
           className="badge-tag"
           style={{
-            background: onlineCount > 0 ? 'rgba(52, 211, 153, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-            color: onlineCount > 0 ? '#34d399' : '#94a3b8',
-            border: `1px solid ${onlineCount > 0 ? 'rgba(52, 211, 153, 0.35)' : 'rgba(148, 163, 184, 0.35)'}`,
+            background: 'rgba(16, 185, 129, 0.15)',
+            color: '#34d399',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
           }}
         >
-          {onlineCount} ONLINE / {validCameras.length || 1} TOTAL
+          {physicalCamerasCount} PHYSICAL CAM / {validCameras.length || 4} SECTORS
         </span>
       </div>
 
@@ -62,7 +62,7 @@ export default function CameraPanel({
         ) : (
           validCameras.map((cam) => {
             const isSelected = cam.camera_id === selectedCameraId;
-            const isOnline = cam.status === 'online';
+            const isPhys = cam.camera_id === 'CAM_01' || cam.camera_id === 'CAM_02';
 
             return (
               <div
@@ -80,13 +80,13 @@ export default function CameraPanel({
               >
                 <div className="camera-header">
                   <div className="camera-name" style={{ color: isSelected ? '#38bdf8' : '#fff' }}>
-                    <Radio size={15} style={{ color: isOnline ? '#34d399' : '#94a3b8' }} />
+                    <Radio size={15} style={{ color: isPhys ? '#34d399' : '#f59e0b' }} />
                     <span>{cam.name}</span>
                     {isSelected && (
                       <span
                         style={{
                           fontSize: '0.66rem',
-                          background: '#0ea5e9',
+                          background: isPhys ? '#0ea5e9' : '#d97706',
                           color: '#fff',
                           padding: '0.12rem 0.4rem',
                           borderRadius: '4px',
@@ -102,15 +102,15 @@ export default function CameraPanel({
                     style={{
                       fontFamily: 'var(--font-mono)',
                       fontSize: '0.72rem',
-                      color: isOnline ? '#34d399' : '#94a3b8',
+                      color: isPhys ? '#34d399' : '#fbbf24',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
                       fontWeight: 700,
                     }}
                   >
-                    {isOnline ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-                    {isOnline ? 'ONLINE' : 'STANDBY'}
+                    {isPhys ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+                    {isPhys ? 'PHYSICAL CAM' : 'NO SENSOR'}
                   </span>
                 </div>
 
