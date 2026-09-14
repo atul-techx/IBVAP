@@ -3543,21 +3543,82 @@ body {
   position: sticky;
   top: 0;
   z-index: 1000;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+/* Sleek authenticated sub-navbar mode when user is logged in */
+.enterprise-nav.auth-subnav {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: none;
 }
 
 .nav-inner {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0.85rem 1.5rem;
+  padding: 0.75rem 1.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
+  flex-wrap: nowrap;
+}
+
+.nav-inner-auth {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0.45rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: nowrap;
+}
+
+.subnav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #0284c7;
+  text-transform: uppercase;
+  white-space: nowrap !important;
+  flex-shrink: 0;
+}
+
+.subnav-quick-action {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.subnav-back-live-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0284c7;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap !important;
+  transition: all 0.2s ease;
+}
+
+.subnav-back-live-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
 }
 
 .nav-brand {
@@ -3566,6 +3627,7 @@ body {
   gap: 0.75rem;
   cursor: pointer;
   text-decoration: none;
+  flex-shrink: 0;
 }
 
 .brand-shield-icon {
@@ -3589,6 +3651,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  white-space: nowrap !important;
 }
 
 .brand-name {
@@ -3613,19 +3676,25 @@ body {
   font-size: 0.75rem;
   color: #64748b;
   font-weight: 500;
+  white-space: nowrap !important;
 }
 
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1.4rem;
+  flex-wrap: nowrap !important;
+  flex-shrink: 0;
 }
 
 .nav-link {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #334155;
   text-decoration: none;
+  white-space: nowrap !important;
+  display: inline-block;
+  line-height: 1.4;
   transition: color 0.2s ease;
 }
 
@@ -3637,6 +3706,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .nav-secondary-btn {

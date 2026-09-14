@@ -40,6 +40,13 @@ function DashboardContent() {
     return unsubscribe;
   }, []);
 
+  // When user successfully logs in, immediately route them to the Live Command Center
+  useEffect(() => {
+    if (isAuthenticated) {
+      setActiveTab((prev) => (prev === 'overview' ? 'live' : prev));
+    }
+  }, [isAuthenticated]);
+
   // Load initial REST data once authenticated
   const loadInitialData = async () => {
     if (!isAuthenticated) return;

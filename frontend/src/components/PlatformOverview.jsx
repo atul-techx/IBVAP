@@ -137,52 +137,69 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       {/* ========================================================================= */}
       {/* 1. TOP ENTERPRISE NAVBAR                                                 */}
       {/* ========================================================================= */}
-      <nav className="enterprise-nav">
-        <div className="nav-inner">
-          <div className="nav-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="brand-shield-icon">
-              <ShieldAlert size={22} />
+      <nav className={`enterprise-nav ${isAuthenticated ? 'auth-subnav' : ''}`}>
+        {isAuthenticated ? (
+          /* Authenticated Sub-Nav: Single-line clean anchor strip without duplicate branding/buttons */
+          <div className="nav-inner-auth">
+            <div className="subnav-label">
+              <Layers size={14} />
+              <span>Overview Sections</span>
             </div>
-            <div className="brand-text-block">
-              <div className="brand-title-row">
-                <span className="brand-name">IBVAP</span>
-                <span className="brand-defense-tag">DEFENSE AI</span>
+
+            <div className="nav-links">
+              <a href="#interactive-slider" className="nav-link">Interactive AI Demo</a>
+              <a href="#pipeline-flow" className="nav-link">Architecture</a>
+              <a href="#platform-cards" className="nav-link">Platform Modules</a>
+              <a href="#capabilities-matrix" className="nav-link">Capabilities</a>
+              <a href="#command-testimony" className="nav-link">Operational Impact</a>
+              <a href="#faq" className="nav-link">FAQ</a>
+            </div>
+
+            <div className="subnav-quick-action">
+              <button className="subnav-back-live-btn" onClick={onLaunchCommandCenter}>
+                <Radio size={14} />
+                <span>Go to Live Command Center</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Unauthenticated Public Landing Nav */
+          <div className="nav-inner">
+            <div className="nav-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+              <div className="brand-shield-icon">
+                <ShieldAlert size={22} />
               </div>
-              <span className="brand-sub">Intelligent Border Video Analytics Platform</span>
+              <div className="brand-text-block">
+                <div className="brand-title-row">
+                  <span className="brand-name">IBVAP</span>
+                  <span className="brand-defense-tag">DEFENSE AI</span>
+                </div>
+                <span className="brand-sub">Intelligent Border Video Analytics Platform</span>
+              </div>
             </div>
-          </div>
 
-          <div className="nav-links">
-            <a href="#interactive-slider" className="nav-link">Interactive AI Demo</a>
-            <a href="#pipeline-flow" className="nav-link">Architecture</a>
-            <a href="#platform-cards" className="nav-link">Platform Modules</a>
-            <a href="#capabilities-matrix" className="nav-link">Capabilities</a>
-            <a href="#command-testimony" className="nav-link">Operational Impact</a>
-            <a href="#faq" className="nav-link">FAQ</a>
-          </div>
+            <div className="nav-links">
+              <a href="#interactive-slider" className="nav-link">Interactive AI Demo</a>
+              <a href="#pipeline-flow" className="nav-link">Architecture</a>
+              <a href="#platform-cards" className="nav-link">Platform Modules</a>
+              <a href="#capabilities-matrix" className="nav-link">Capabilities</a>
+              <a href="#command-testimony" className="nav-link">Operational Impact</a>
+              <a href="#faq" className="nav-link">FAQ</a>
+            </div>
 
-          <div className="nav-actions">
-            {isAuthenticated ? (
+            <div className="nav-actions">
+              <button className="nav-secondary-btn" onClick={onLoginClick}>
+                <Lock size={14} />
+                <span>Operator Login</span>
+              </button>
               <button className="nav-launch-btn" onClick={onLaunchCommandCenter}>
                 <span className="pulse-dot active"></span>
-                <span>Enter Live Command Center</span>
+                <span>Launch Live Command Center</span>
                 <ArrowRight size={15} />
               </button>
-            ) : (
-              <>
-                <button className="nav-secondary-btn" onClick={onLoginClick}>
-                  <Lock size={14} />
-                  <span>Operator Login</span>
-                </button>
-                <button className="nav-launch-btn" onClick={onLaunchCommandCenter}>
-                  <span className="pulse-dot active"></span>
-                  <span>Launch Live Command Center</span>
-                  <ArrowRight size={15} />
-                </button>
-              </>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </nav>
 
       {/* ========================================================================= */}
