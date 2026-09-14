@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import asyncio
+import base64
 import os
 import subprocess
 import sys
@@ -1277,6 +1278,208 @@ class StreamControlRequest(BaseModel):
     source_type: str = "test_video"  # "webcam" | "test_video" | "rtsp"
     imgsz: int = 480
     show_zone: bool = True
+
+
+class ClientFrameRequest(BaseModel):
+    image: str  # Base64 data URL
+    camera_id: Optional[str] = "CAM_01"
+    show_zone: Optional[bool] = True
+
+
+_CLIENT_YOLO_MODEL = None
+_CLIENT_YOLO_LOCK = threading.Lock()
+_LAST_CLIENT_INTRUSION_LOG: dict[str, float] = {}
+
+
+def get_client_yolo_model():
+    global _CLIENT_YOLO_MODEL
+    if _CLIENT_YOLO_MODEL is None:
+        with _CLIENT_YOLO_LOCK:
+            if _CLIENT_YOLO_MODEL is None:
+                try:
+                    from ultralytics import YOLO
+                    app_dir = Path(__file__).resolve().parent
+                    candidates = [
+                        app_dir.parent / "models" / "yolov8n.pt",
+                        app_dir.parent.parent / "yolov8n.pt",
+                        Path("yolov8n.pt"),
+                    ]
+                    m_path = None
+                    for c in candidates:
+                        if c.exists():
+                            m_path = str(c)
+                            break
+                    if not m_path:
+                        m_path = "yolov8n.pt"
+                    print(f"[*] Initializing client frame YOLO model from: {m_path}")
+                    _CLIENT_YOLO_MODEL = YOLO(m_path)
+                except Exception as e:
+                    print(f"[!] Warning: Could not initialize YOLO model in main.py: {e}")
+                    _CLIENT_YOLO_MODEL = False
+    return _CLIENT_YOLO_MODEL if _CLIENT_YOLO_MODEL is not False else None
+
+
+@app.post("/api/stream/process-client-frame")
+async def process_client_frame(
+    req: ClientFrameRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Process real-time browser webcam frame for AI border security analytics.
+    Performs YOLOv8 object detection, Virtual Fence intrusion check, and Face Recognition.
+    """
+    try:
+        img_str = req.image
+        if "," in img_str:
+            img_str = img_str.split(",", 1)[1]
+        raw_bytes = base64.b64decode(img_str)
+        nparr = np.frombuffer(raw_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("Failed to decode image buffer")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid frame data: {str(e)}")
+
+    height, width = frame.shape[:2]
+    # Dedicated side perimeter corridor for webcam mode so sitting at desk does not trigger false alerts
+    # Corridor covers right 35% of the frame: [[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]]
+    webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
+    polygon = (webcam_poly * [width, height]).astype(np.int32)
+
+    model = get_client_yolo_model()
+    detections = []
+    has_intrusion = False
+    occupancy = 0
+    t0 = time.time()
+
+    if model is not None:
+        try:
+            results = model.track(
+                source=frame,
+                persist=True,
+                classes=[0, 1, 2, 3, 5, 7],
+                conf=0.35,
+                imgsz=384,
+                verbose=False,
+            )[0]
+            boxes = results.boxes
+            if boxes is not None and len(boxes) > 0:
+                recognizer = get_active_face_recognizer()
+                for box in boxes:
+                    cls_id = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    xyxy = box.xyxy[0].tolist()
+                    x1, y1, x2, y2 = [int(v) for v in xyxy]
+                    cls_name = model.names.get(cls_id, f"class_{cls_id}")
+                    track_id = int(box.id[0]) if box.id is not None else 1
+
+                    if cls_name == "person":
+                        occupancy += 1
+
+                    foot_point = (int((x1 + x2) / 2), int(y2))
+                    center_point = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+
+                    is_inside = False
+                    if req.show_zone:
+                        poly_foot = cv2.pointPolygonTest(polygon, (float(foot_point[0]), float(foot_point[1])), False)
+                        poly_center = cv2.pointPolygonTest(polygon, (float(center_point[0]), float(center_point[1])), False)
+                        is_inside = (poly_foot >= 0 or poly_center >= 0)
+
+                    if is_inside:
+                        has_intrusion = True
+
+                    identified_as = None
+                    face_conf = 0.0
+                    face_bbox = None
+                    if cls_name == "person" and recognizer is not None:
+                        try:
+                            identified_as, face_conf, face_bbox = recognizer.identify_face_in_person_crop(
+                                frame, (x1, y1, x2, y2)
+                            )
+                        except Exception:
+                            pass
+
+                    detections.append({
+                        "class_name": cls_name,
+                        "track_id": track_id,
+                        "confidence": round(conf, 2),
+                        "bbox": [x1, y1, x2, y2],
+                        "norm_bbox": [
+                            round(x1 / width, 4),
+                            round(y1 / height, 4),
+                            round(x2 / width, 4),
+                            round(y2 / height, 4),
+                        ],
+                        "in_zone": is_inside,
+                        "identified_as": identified_as,
+                        "face_confidence": round(face_conf, 2) if face_conf else None,
+                        "face_bbox": face_bbox,
+                    })
+        except Exception as det_err:
+            print(f"[!] Warning running client YOLO detection: {det_err}")
+
+    # Enqueue intrusion event with rate limiting (at most once every 3.5 seconds)
+    now = time.time()
+    last_logged = _LAST_CLIENT_INTRUSION_LOG.get(req.camera_id, 0)
+    if has_intrusion and (now - last_logged >= 3.5):
+        _LAST_CLIENT_INTRUSION_LOG[req.camera_id] = now
+        try:
+            from backend.app.events import log_event_async
+        except ImportError:
+            try:
+                from events import log_event_async
+            except ImportError:
+                log_event_async = None
+        if log_event_async:
+            primary_det = next((d for d in detections if d.get("in_zone")), detections[0] if detections else None)
+            det_class = primary_det["class_name"] if primary_det else "person"
+            det_track = primary_det["track_id"] if primary_det else 1
+            det_bbox = [float(v) for v in primary_det["bbox"]] if primary_det else [0.0, 0.0, float(width), float(height)]
+            det_conf = primary_det["confidence"] if primary_det else 0.85
+            ident = primary_det.get("identified_as") if primary_det else None
+            log_event_async(
+                camera_id=req.camera_id,
+                event_type="zone_entry",
+                object_class=det_class,
+                track_id=det_track,
+                frame_number=0,
+                bbox=det_bbox,
+                confidence=det_conf,
+                frame=frame,
+                identified_as=ident,
+                source_video="live_browser_webcam",
+            )
+
+    # Push to in-memory frame hub and update telemetry
+    hub = get_frame_hub()
+    inference_fps = round(1.0 / max(time.time() - t0, 0.001), 1)
+    if hub:
+        hub.update_telemetry(
+            camera_id=req.camera_id,
+            footfall_in=0,
+            footfall_out=0,
+            occupancy=occupancy,
+            fps=inference_fps,
+        )
+        try:
+            hub.push_ndarray(req.camera_id, frame)
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "camera_id": req.camera_id,
+        "width": width,
+        "height": height,
+        "polygon": webcam_poly.tolist(),
+        "detections": detections,
+        "has_intrusion": has_intrusion,
+        "occupancy": occupancy,
+        "telemetry": {
+            "fps": inference_fps,
+            "occupancy": occupancy,
+        },
+    }
 
 
 @app.get("/api/stream/videos")

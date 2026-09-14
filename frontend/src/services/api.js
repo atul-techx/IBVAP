@@ -234,6 +234,19 @@ export async function fetchAvailableVideos() {
   return res.json();
 }
 
+export async function processClientFrame(payload) {
+  const res = await fetch(`${API_BASE}/api/stream/process-client-frame`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to process client frame');
+  }
+  return res.json();
+}
+
 export async function verifyAuditTrail() {
   const res = await fetch(`${API_BASE}/api/audit/verify`, {
     headers: authHeaders(),

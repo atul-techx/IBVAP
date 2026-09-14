@@ -18,6 +18,7 @@ import {
   Eye,
   CheckCircle,
   Clock,
+  FlipHorizontal,
 } from 'lucide-react';
 import {
   getLiveFeedUrl,
@@ -26,7 +27,9 @@ import {
   stopStream,
   fetchStreamStatus,
   fetchAvailableVideos,
+  processClientFrame,
 } from '../services/api';
+import voiceAlertService from '../services/voiceAlertService';
 
 export default function LiveVideoFeed({
   cameraId = 'CAM_01',
@@ -45,12 +48,26 @@ export default function LiveVideoFeed({
   const [availableVideos, setAvailableVideos] = useState([]);
   const [selectedVideo, setSelectedVideo] = useState('sample.mp4');
   const [isControllingStream, setIsControllingStream] = useState(false);
-  const [streamMode, setStreamMode] = useState('mjpeg'); // 'mjpeg' | 'fallback_frame'
+  const [streamMode, setStreamMode] = useState('mjpeg'); // 'mjpeg' | 'fallback_frame' | 'browser_webcam'
   const [showZone, setShowZone] = useState(true);
-  const [activeSourceType, setActiveSourceType] = useState('webcam');
+  const [activeSourceType, setActiveSourceType] = useState('test_video'); // 'test_video' | 'browser_webcam'
   const [manuallyStopped, setManuallyStopped] = useState(false);
+  const [fallbackFrameUrl, setFallbackFrameUrl] = useState('');
+  const [webcamError, setWebcamError] = useState(null);
+  const [isWebcamMirror, setIsWebcamMirror] = useState(true);
+  const [clientDetections, setClientDetections] = useState([]);
+  const [clientHasIntrusion, setClientHasIntrusion] = useState(false);
+  const [clientTelemetry, setClientTelemetry] = useState({ fps: 0, occupancy: 0 });
+
   const videoContainerRef = useRef(null);
   const fallbackIntervalRef = useRef(null);
+  const webcamVideoRef = useRef(null);
+  const webcamCanvasRef = useRef(null);
+  const webcamStreamRef = useRef(null);
+  const webcamIntervalRef = useRef(null);
+  const isSendingFrameRef = useRef(false);
+  const showZoneRef = useRef(showZone);
+  showZoneRef.current = showZone;
 
   const feedUrl = `${getLiveFeedUrl(cameraId)}?v=${streamKey}`;
 
@@ -59,7 +76,203 @@ export default function LiveVideoFeed({
   );
 
   const isProcessRunning = streamProcesses[cameraId]?.running || false;
-  const isCamOnline = !manuallyStopped && (isProcessRunning || (validCameras.find((c) => c.camera_id === cameraId)?.status === 'online'));
+  const isCamOnline = !manuallyStopped && (streamMode === 'browser_webcam' || isProcessRunning || (validCameras.find((c) => c.camera_id === cameraId)?.status === 'online'));
+
+  // Helper to cleanly terminate browser webcam hardware tracks
+  const stopBrowserWebcamTracks = () => {
+    if (webcamIntervalRef.current) {
+      clearInterval(webcamIntervalRef.current);
+      webcamIntervalRef.current = null;
+    }
+    if (webcamStreamRef.current) {
+      try {
+        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch (_) {}
+      webcamStreamRef.current = null;
+    }
+    if (webcamVideoRef.current) {
+      webcamVideoRef.current.srcObject = null;
+    }
+    setClientDetections([]);
+    setClientHasIntrusion(false);
+  };
+
+  // Draw cyber tactical virtual fence and live AI bounding boxes on browser webcam overlay canvas
+  const drawClientOverlay = (canvas, w, h, detections, hasIntrusion, zoneActive) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Draw Virtual Fence Polygon on the right side
+    if (zoneActive) {
+      const poly = [
+        [0.62 * w, 0.12 * h],
+        [0.96 * w, 0.12 * h],
+        [0.96 * w, 0.88 * h],
+        [0.62 * w, 0.88 * h],
+      ];
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let i = 1; i < poly.length; i++) {
+        ctx.lineTo(poly[i][0], poly[i][1]);
+      }
+      ctx.closePath();
+
+      // Translucent cyber fill
+      ctx.fillStyle = hasIntrusion ? 'rgba(239, 68, 68, 0.22)' : 'rgba(56, 189, 248, 0.10)';
+      ctx.fill();
+
+      // Glowing cyber perimeter border
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
+      ctx.shadowColor = hasIntrusion ? '#ef4444' : '#38bdf8';
+      ctx.shadowBlur = hasIntrusion ? 16 : 8;
+      ctx.stroke();
+
+      // Corner reticles for high-tech look
+      poly.forEach(([px, py]) => {
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
+        ctx.fill();
+      });
+
+      // Zone Label Badge
+      ctx.font = 'bold 12px monospace';
+      ctx.fillStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
+      ctx.fillText(
+        hasIntrusion ? '⚠ ALERT: VIRTUAL FENCE INTRUSION' : '🛡 ZONE: POLYGON α (PERIMETER)',
+        0.62 * w + 8,
+        0.12 * h - 8
+      );
+      ctx.restore();
+    }
+
+    // 2. Draw Detections (Bounding Boxes & Badges)
+    detections.forEach((det) => {
+      if (!det.norm_bbox) return;
+      const [nx1, ny1, nx2, ny2] = det.norm_bbox;
+      const x1 = nx1 * w;
+      const y1 = ny1 * h;
+      const bw = (nx2 - nx1) * w;
+      const bh = (ny2 - ny1) * h;
+
+      const isInZone = det.in_zone;
+      const boxColor = isInZone ? '#ef4444' : (det.identified_as ? '#10b981' : '#38bdf8');
+
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = boxColor;
+      ctx.shadowColor = boxColor;
+      ctx.shadowBlur = isInZone ? 14 : 6;
+      ctx.strokeRect(x1, y1, bw, bh);
+
+      // Corner reticles
+      const rLen = Math.min(16, bw / 4, bh / 4);
+      ctx.lineWidth = 3.5;
+      // top-left
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 + rLen);
+      ctx.lineTo(x1, y1);
+      ctx.lineTo(x1 + rLen, y1);
+      ctx.stroke();
+      // top-right
+      ctx.beginPath();
+      ctx.moveTo(x1 + bw - rLen, y1);
+      ctx.lineTo(x1 + bw, y1);
+      ctx.lineTo(x1 + bw, y1 + rLen);
+      ctx.stroke();
+      // bottom-left
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 + bh - rLen);
+      ctx.lineTo(x1, y1 + bh);
+      ctx.lineTo(x1 + rLen, y1 + bh);
+      ctx.stroke();
+      // bottom-right
+      ctx.beginPath();
+      ctx.moveTo(x1 + bw - rLen, y1 + bh);
+      ctx.lineTo(x1 + bw, y1 + bh);
+      ctx.lineTo(x1 + bw, y1 + bh - rLen);
+      ctx.stroke();
+
+      // Label Header Badge
+      const labelText = `${det.class_name.toUpperCase()} #${det.track_id} (${Math.round(det.confidence * 100)}%)${isInZone ? ' [INTRUSION]' : ''}${det.identified_as ? ` [${det.identified_as}]` : ''}`;
+      ctx.font = 'bold 11px monospace';
+      const textWidth = ctx.measureText(labelText).width;
+      ctx.fillStyle = isInZone ? 'rgba(239, 68, 68, 0.92)' : 'rgba(15, 23, 42, 0.88)';
+      ctx.fillRect(x1, Math.max(0, y1 - 21), textWidth + 12, 20);
+      ctx.strokeStyle = boxColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x1, Math.max(0, y1 - 21), textWidth + 12, 20);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(labelText, x1 + 6, Math.max(14, y1 - 7));
+      ctx.restore();
+    });
+  };
+
+  // Start continuous AI inference frame capture loop (~350ms interval, ~3 FPS)
+  const startClientAiLoop = () => {
+    if (webcamIntervalRef.current) clearInterval(webcamIntervalRef.current);
+
+    const offscreenCanvas = document.createElement('canvas');
+    const offscreenCtx = offscreenCanvas.getContext('2d');
+
+    webcamIntervalRef.current = setInterval(async () => {
+      const video = webcamVideoRef.current;
+      const canvas = webcamCanvasRef.current;
+      if (!video || !canvas || video.readyState < 2 || isSendingFrameRef.current) return;
+
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+
+      if (canvas.width !== vw || canvas.height !== vh) {
+        canvas.width = vw;
+        canvas.height = vh;
+      }
+      if (offscreenCanvas.width !== 480 || offscreenCanvas.height !== 360) {
+        offscreenCanvas.width = 480;
+        offscreenCanvas.height = 360;
+      }
+
+      try {
+        offscreenCtx.drawImage(video, 0, 0, 480, 360);
+        const dataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.65);
+
+        isSendingFrameRef.current = true;
+        const res = await processClientFrame({
+          image: dataUrl,
+          camera_id: cameraId,
+          show_zone: showZoneRef.current,
+        });
+
+        if (res?.status === 'success') {
+          setClientDetections(res.detections || []);
+          setClientHasIntrusion(res.has_intrusion || false);
+          if (res.telemetry) {
+            setClientTelemetry(res.telemetry);
+          }
+
+          drawClientOverlay(canvas, vw, vh, res.detections || [], res.has_intrusion || false, showZoneRef.current);
+
+          if (res.has_intrusion) {
+            voiceAlertService.announceEvent({
+              event_type: 'zone_entry',
+              object_class: 'person',
+              severity: 'high',
+              camera_id: cameraId,
+            });
+          }
+        }
+      } catch (err) {
+        // Silently skip frame error to keep smooth UI
+      } finally {
+        isSendingFrameRef.current = false;
+      }
+    }, 350);
+  };
 
   // Load available test videos on mount
   useEffect(() => {
@@ -106,11 +319,21 @@ export default function LiveVideoFeed({
 
   // Reset loading state and gracefully clear error when switching camera
   useEffect(() => {
+    stopBrowserWebcamTracks();
     setIsLoaded(false);
     setHasError(false);
     setManuallyStopped(false);
+    setStreamMode('mjpeg');
+    setActiveSourceType('test_video');
     setStreamKey(Date.now());
   }, [cameraId]);
+
+  // Clean up browser webcam tracks on component unmount
+  useEffect(() => {
+    return () => {
+      stopBrowserWebcamTracks();
+    };
+  }, []);
 
   // Gracefully transition out the loader after 700ms so MJPEG stream is never hidden behind spinner
   useEffect(() => {
@@ -138,6 +361,7 @@ export default function LiveVideoFeed({
 
   // 1-Click Launch or Switch Surveillance Video Feed (Continuous Loop)
   const handleStartVideoFeed = async (videoFilename = selectedVideo) => {
+    stopBrowserWebcamTracks();
     setActiveSourceType('test_video');
     setManuallyStopped(false);
     setIsControllingStream(true);
@@ -166,45 +390,68 @@ export default function LiveVideoFeed({
     }
   };
 
-  // 1-Click Launch Live Webcam
+  // Launch Real Browser Device Webcam with Live AI Border Surveillance Analytics
   const handleStartWebcam = async () => {
-    setActiveSourceType('webcam');
+    stopBrowserWebcamTracks();
+    stopStream(cameraId).catch(() => {});
+
+    setActiveSourceType('browser_webcam');
+    setStreamMode('browser_webcam');
     setManuallyStopped(false);
     setIsControllingStream(true);
     setHasError(false);
+    setWebcamError(null);
     setIsLoaded(false);
-    setStreamMode('mjpeg');
+
     try {
-      const res = await startStream(cameraId, {
-        source: '0',
-        sourceType: 'webcam',
-        imgsz: 384,
-        showZone: showZone,
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Browser mediaDevices API is not supported in this browser or environment.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user',
+        },
+        audio: false,
       });
-      setStreamProcesses((prev) => ({
-        ...prev,
-        [cameraId]: { running: true, pid: res?.pid || null },
-      }));
-      setTimeout(() => {
-        setStreamKey(Date.now());
-      }, 1200);
+
+      webcamStreamRef.current = stream;
+      if (webcamVideoRef.current) {
+        webcamVideoRef.current.srcObject = stream;
+        await webcamVideoRef.current.play().catch(() => {});
+      }
+
+      setIsLoaded(true);
+      setIsControllingStream(false);
+      startClientAiLoop();
     } catch (err) {
-      alert(`Failed to start webcam: ${err.message}`);
-    } finally {
+      console.error('[Webcam] Access error:', err);
+      const errMsg =
+        err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+          ? 'Camera permission denied. Please click the camera icon in your browser address bar to allow camera access.'
+          : err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError'
+          ? 'No camera device found on your device.'
+          : `Failed to open camera: ${err.message}`;
+      setWebcamError(errMsg);
+      setIsLoaded(true);
       setIsControllingStream(false);
     }
   };
 
-  // Auto-start Live Camera on initial system launch
+  // Auto-start Demo Surveillance Loop on initial system launch
   useEffect(() => {
     if (cameraId === 'CAM_01' && !manuallyStopped) {
       fetchStreamStatus()
         .then((status) => {
           if (!status?.CAM_01?.running) {
-            handleStartWebcam();
+            handleStartVideoFeed('sample.mp4');
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          handleStartVideoFeed('sample.mp4');
+        });
     }
   }, []);
 
@@ -212,25 +459,25 @@ export default function LiveVideoFeed({
   const handleToggleZone = async () => {
     const nextZone = !showZone;
     setShowZone(nextZone);
+    showZoneRef.current = nextZone;
+
+    if (streamMode === 'browser_webcam') {
+      const canvas = webcamCanvasRef.current;
+      if (canvas) {
+        drawClientOverlay(canvas, canvas.width, canvas.height, clientDetections, clientHasIntrusion, nextZone);
+      }
+      return;
+    }
+
     setManuallyStopped(false);
     setIsControllingStream(true);
     try {
-      let res;
-      if (activeSourceType === 'webcam') {
-        res = await startStream(cameraId, {
-          source: '0',
-          sourceType: 'webcam',
-          imgsz: 384,
-          showZone: nextZone,
-        });
-      } else {
-        res = await startStream(cameraId, {
-          source: selectedVideo,
-          sourceType: 'test_video',
-          imgsz: 480,
-          showZone: nextZone,
-        });
-      }
+      const res = await startStream(cameraId, {
+        source: selectedVideo,
+        sourceType: 'test_video',
+        imgsz: 480,
+        showZone: nextZone,
+      });
       setStreamProcesses((prev) => ({
         ...prev,
         [cameraId]: { running: true, pid: res?.pid || null },
@@ -247,6 +494,7 @@ export default function LiveVideoFeed({
 
   // 1-Click Stop Active Stream
   const handleStopStream = async () => {
+    stopBrowserWebcamTracks();
     setIsControllingStream(true);
     try {
       await stopStream(cameraId);
@@ -263,6 +511,10 @@ export default function LiveVideoFeed({
   };
 
   const handleRefresh = async () => {
+    if (streamMode === 'browser_webcam') {
+      handleStartWebcam();
+      return;
+    }
     setManuallyStopped(false);
     setHasError(false);
     setIsLoaded(false);
@@ -270,9 +522,9 @@ export default function LiveVideoFeed({
     setStreamKey(Date.now());
     try {
       const res = await startStream(cameraId, {
-        source: activeSourceType === 'webcam' ? '0' : selectedVideo,
-        sourceType: activeSourceType,
-        imgsz: activeSourceType === 'webcam' ? 384 : 480,
+        source: selectedVideo,
+        sourceType: 'test_video',
+        imgsz: 480,
         showZone: showZone,
       });
       setStreamProcesses((prev) => ({
@@ -398,11 +650,15 @@ export default function LiveVideoFeed({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#0f172a', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56, 189, 248, 0.4)' }}>
             <Film size={13} style={{ color: '#38bdf8' }} />
             <select
-              value={selectedVideo}
+              value={activeSourceType === 'browser_webcam' ? 'browser_webcam' : selectedVideo}
               onChange={(e) => {
                 const vid = e.target.value;
-                setSelectedVideo(vid);
-                handleStartVideoFeed(vid);
+                if (vid === 'browser_webcam') {
+                  handleStartWebcam();
+                } else {
+                  setSelectedVideo(vid);
+                  handleStartVideoFeed(vid);
+                }
               }}
               style={{
                 background: '#0f172a',
@@ -416,6 +672,7 @@ export default function LiveVideoFeed({
               }}
               title="Select Video Surveillance Scenario"
             >
+              <option value="browser_webcam" style={{ background: '#0f172a', color: '#34d399', fontWeight: 700 }}>📹 My Device Webcam (Live AI)</option>
               <option value="sample.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Sector 01 (Bus & Person Intrusion)</option>
               <option value="tracking_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Sector 04 (Multi-Target Tracking)</option>
               <option value="dark_test.mp4" style={{ background: '#0f172a', color: '#f8fafc' }}>Night Vision (CLAHE Retinex)</option>
@@ -455,10 +712,10 @@ export default function LiveVideoFeed({
             className="icon-btn"
             onClick={handleStartWebcam}
             disabled={isControllingStream}
-            title="Activate Live Webcam Device"
+            title="Open Live Device Camera with Real-Time AI Detection"
             style={{
-              background: 'rgba(16, 185, 129, 0.2)',
-              border: '1px solid #10b981',
+              background: activeSourceType === 'browser_webcam' ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.2)',
+              border: `1px solid ${activeSourceType === 'browser_webcam' ? '#34d399' : '#10b981'}`,
               color: '#34d399',
               padding: '0.35rem 0.65rem',
               borderRadius: 'var(--radius-sm)',
@@ -468,11 +725,37 @@ export default function LiveVideoFeed({
               fontWeight: 700,
               fontSize: '0.78rem',
               cursor: 'pointer',
+              boxShadow: activeSourceType === 'browser_webcam' ? '0 0 10px rgba(16, 185, 129, 0.4)' : 'none',
             }}
           >
             <Video size={13} />
-            <span>Webcam</span>
+            <span>{activeSourceType === 'browser_webcam' ? 'Webcam (Active)' : 'Webcam'}</span>
           </button>
+
+          {/* Mirror Toggle Button (Browser Webcam Mode Only) */}
+          {streamMode === 'browser_webcam' && (
+            <button
+              className="icon-btn"
+              onClick={() => setIsWebcamMirror((prev) => !prev)}
+              title={isWebcamMirror ? 'Disable Mirror Mode' : 'Enable Mirror Mode'}
+              style={{
+                background: 'rgba(56, 189, 248, 0.15)',
+                border: '1px solid #38bdf8',
+                color: '#38bdf8',
+                padding: '0.35rem 0.55rem',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                fontWeight: 600,
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+              }}
+            >
+              <FlipHorizontal size={13} />
+              <span>{isWebcamMirror ? 'Mirrored' : 'Normal'}</span>
+            </button>
+          )}
 
           {/* Virtual Fence Zone (Blue Box) Toggle Button */}
           <button
@@ -569,7 +852,7 @@ export default function LiveVideoFeed({
           </div>
         )}
 
-        {/* Stopped Standby Screen OR Live MJPEG / Fallback Stream */}
+        {/* Stopped Standby Screen OR Live Stream (Browser Webcam / MJPEG / Fallback) */}
         {manuallyStopped ? (
           <div
             className="stream-stopped-overlay"
@@ -655,6 +938,71 @@ export default function LiveVideoFeed({
               </button>
             </div>
           </div>
+        ) : streamMode === 'browser_webcam' ? (
+          <div
+            className="browser-webcam-container"
+            style={{
+              position: 'relative',
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#020617',
+              overflow: 'hidden',
+            }}
+          >
+            <video
+              ref={webcamVideoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
+              }}
+            />
+            <canvas
+              ref={webcamCanvasRef}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
+              }}
+            />
+            {webcamError && (
+              <div className="stream-error-overlay" style={{ zIndex: 10 }}>
+                <AlertTriangle size={36} style={{ color: '#fbbf24', marginBottom: '0.6rem' }} />
+                <div style={{ color: '#f8fafc', fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.4rem' }}>
+                  Webcam Notice
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '0.85rem', maxWidth: 420, marginBottom: '1.2rem', lineHeight: 1.5 }}>
+                  {webcamError}
+                </div>
+                <button
+                  onClick={() => handleStartVideoFeed(selectedVideo)}
+                  style={{
+                    background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                    border: '1px solid #38bdf8',
+                    color: '#ffffff',
+                    padding: '0.55rem 1.2rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Switch to Border Surveillance Feed
+                </button>
+              </div>
+            )}
+          </div>
         ) : streamMode === 'mjpeg' ? (
           <img
             key={streamKey}
@@ -694,25 +1042,33 @@ export default function LiveVideoFeed({
             <span className="hud-label" style={{ color: manuallyStopped ? '#94a3b8' : '#f87171', fontWeight: 800 }}>
               {manuallyStopped ? 'STANDBY' : 'LIVE'}
             </span>
-            <span className="hud-val">{manuallyStopped ? 'STREAM PAUSED' : 'YOLOv8 + BYTETRACK'}</span>
+            <span className="hud-val">
+              {manuallyStopped
+                ? 'STREAM PAUSED'
+                : (streamMode === 'browser_webcam' ? 'DEVICE WEBCAM // YOLOv8' : 'YOLOv8 + BYTETRACK')}
+            </span>
           </div>
           <div className="hud-metric">
             <Layers size={12} style={{ color: '#06b6d4' }} />
             <span className="hud-label">ZONE:</span>
-            <span className="hud-val">POLYGON α</span>
+            <span className="hud-val">{showZone ? 'POLYGON α' : 'MUTED'}</span>
           </div>
           <div className="hud-metric">
-            <Users size={12} style={{ color: manuallyStopped ? '#64748b' : (hasIntrusion ? '#f87171' : '#34d399') }} />
+            <Users size={12} style={{ color: manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399') }} />
             <span className="hud-label">STATUS:</span>
             <span
               className="hud-val"
               style={{
-                color: manuallyStopped ? '#64748b' : (hasIntrusion ? '#f87171' : '#34d399'),
+                color: manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399'),
                 fontWeight: 800,
                 letterSpacing: '0.04em',
               }}
             >
-              {manuallyStopped ? 'CAMERA OFF' : (hasIntrusion ? `INTRUSION (${camTelemetry.occupancy})` : 'SECTOR CLEAR')}
+              {manuallyStopped
+                ? 'CAMERA OFF'
+                : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0)
+                  ? `INTRUSION (${streamMode === 'browser_webcam' ? (clientTelemetry.occupancy || 1) : camTelemetry.occupancy})`
+                  : 'SECTOR CLEAR')}
             </span>
           </div>
         </div>
@@ -737,10 +1093,14 @@ export default function LiveVideoFeed({
           }}
         >
           <span style={{ color: manuallyStopped ? '#64748b' : '#38bdf8', fontWeight: 700 }}>
-            {manuallyStopped ? '0.0' : (camTelemetry.fps ? camTelemetry.fps.toFixed(1) : '30.0')} FPS
+            {manuallyStopped
+              ? '0.0'
+              : (streamMode === 'browser_webcam'
+                ? (clientTelemetry.fps ? clientTelemetry.fps.toFixed(1) : '30.0')
+                : (camTelemetry.fps ? camTelemetry.fps.toFixed(1) : '30.0'))} FPS
           </span>
           <span style={{ color: '#64748b' }}>|</span>
-          <span>{manuallyStopped ? 'PAUSED' : 'LOOP ACTIVE'}</span>
+          <span>{manuallyStopped ? 'PAUSED' : (streamMode === 'browser_webcam' ? 'LIVE CAMERA' : 'LOOP ACTIVE')}</span>
         </div>
 
         {/* Fallback Display if stream disconnects */}
