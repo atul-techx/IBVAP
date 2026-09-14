@@ -249,13 +249,13 @@ export default function LiveVideoFeed({
         canvas.width = vw;
         canvas.height = vh;
       }
-      if (offscreenCanvas.width !== 480 || offscreenCanvas.height !== 360) {
-        offscreenCanvas.width = 480;
+      if (offscreenCanvas.width !== 640 || offscreenCanvas.height !== 360) {
+        offscreenCanvas.width = 640;
         offscreenCanvas.height = 360;
       }
 
       try {
-        offscreenCtx.drawImage(video, 0, 0, 480, 360);
+        offscreenCtx.drawImage(video, 0, 0, 640, 360);
         const dataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.65);
 
         isSendingFrameRef.current = true;
@@ -466,8 +466,9 @@ export default function LiveVideoFeed({
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 360 },
+          aspectRatio: { ideal: 1.7777777778 },
           facingMode: 'user',
         },
         audio: false,
@@ -1036,7 +1037,7 @@ export default function LiveVideoFeed({
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'contain',
+                objectFit: 'cover',
                 transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
               }}
             />
@@ -1048,6 +1049,7 @@ export default function LiveVideoFeed({
                 left: 0,
                 width: '100%',
                 height: '100%',
+                objectFit: 'cover',
                 pointerEvents: 'none',
                 transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
               }}
