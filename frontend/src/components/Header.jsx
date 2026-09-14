@@ -11,6 +11,7 @@ import {
   Info,
   Volume2,
   VolumeX,
+  Compass,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -39,7 +40,7 @@ export default function Header({
 
   return (
     <header className="top-header">
-      <div className="brand-section">
+      <div className="brand-section" onClick={() => setActiveTab('overview')} style={{ cursor: 'pointer' }} title="Return to Platform Overview">
         <div className="brand-logo" title="Intelligent Border Video Analytics Platform">
           <ShieldAlert size={22} />
         </div>
@@ -54,6 +55,14 @@ export default function Header({
       </div>
 
       <nav className="nav-tabs" aria-label="Primary Navigation">
+        <button
+          className={`nav-btn ${activeTab === 'overview' ? 'active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+          aria-pressed={activeTab === 'overview'}
+        >
+          <Compass size={16} />
+          <span>Platform Overview</span>
+        </button>
         <button
           className={`nav-btn ${activeTab === 'live' ? 'active' : ''}`}
           onClick={() => setActiveTab('live')}

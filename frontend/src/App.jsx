@@ -8,14 +8,16 @@ import EventHistory from './components/EventHistory';
 import SnapshotModal from './components/SnapshotModal';
 import LoginPage from './components/LoginPage';
 import AdminPanel from './components/AdminPanel';
+import PlatformOverview from './components/PlatformOverview';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { fetchStats, fetchCameras, fetchEvents, WS_BASE } from './services/api';
 import voiceAlertService from './services/voiceAlertService';
 import { ShieldAlert } from 'lucide-react';
 
 function DashboardContent() {
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState('live');
+  const { isAuthenticated, user, isLoading: isAuthLoading } = useAuth();
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [stats, setStats] = useState(null);
   const [cameras, setCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState('CAM_01');
@@ -245,9 +247,43 @@ function DashboardContent() {
     );
   }
 
-  // Gate dashboard behind authentication screen
+  // Show login screen if requested, otherwise show public platform overview
   if (!isAuthenticated) {
-    return <LoginPage />;
+    if (showLoginModal) {
+      return <LoginPage onCancel={() => setShowLoginModal(false)} />;
+    }
+    return (
+      <PlatformOverview
+        onLaunchCommandCenter={() => setShowLoginModal(true)}
+        onLoginClick={() => setShowLoginModal(true)}
+        isAuthenticated={false}
+        user={null}
+      />
+    );
+  }
+
+  // When authenticated, if activeTab is 'overview', render PlatformOverview inside app container with Header
+  if (activeTab === 'overview') {
+    return (
+      <div className="app-container">
+        <Header
+          isConnected={isConnected}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          liveCount={liveEvents.length}
+          isVoiceMuted={isVoiceMuted}
+          isVoiceSpeaking={isVoiceSpeaking}
+          onToggleVoiceMute={() => voiceAlertService.toggleMute()}
+          onTestVoice={() => voiceAlertService.testVoice()}
+        />
+        <PlatformOverview
+          onLaunchCommandCenter={() => setActiveTab('live')}
+          onLoginClick={() => {}}
+          isAuthenticated={true}
+          user={user}
+        />
+      </div>
+    );
   }
 
   return (

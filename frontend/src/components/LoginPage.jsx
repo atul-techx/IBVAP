@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginPage() {
+export default function LoginPage({ onCancel }) {
   const { login, authError, clearError } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -69,6 +69,16 @@ export default function LoginPage() {
       <div className="login-grid-bg" />
 
       <div className="login-card">
+        {onCancel && (
+          <button
+            type="button"
+            className="login-back-btn"
+            onClick={onCancel}
+            title="Return to Platform Overview"
+          >
+            ← Back to Platform Overview
+          </button>
+        )}
         {/* Header Branding */}
         <div className="login-header">
           <div className="login-logo-container">
