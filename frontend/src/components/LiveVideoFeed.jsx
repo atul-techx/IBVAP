@@ -79,6 +79,12 @@ export default function LiveVideoFeed({
     (c) => c?.camera_id && !c.camera_id.toUpperCase().startsWith('SYSTEM') && !c.camera_id.toUpperCase().startsWith('AUTH')
   );
 
+  const currentCam = validCameras.find((c) => c.camera_id === cameraId) || {
+    camera_id: cameraId,
+    name: cameraName || cameraId,
+    location: location,
+  };
+
   const isProcessRunning = streamProcesses[cameraId]?.running || false;
   const isCamOnline = !manuallyStopped && (
     isPhysicalCamera
@@ -1146,35 +1152,36 @@ export default function LiveVideoFeed({
                   boxShadow: '0 0 8px #f59e0b',
                 }}
               />
-              SECTOR SENSOR DISCONNECTED
+              SECTOR SENSOR DISCONNECTED // SENSOR OFFLINE
             </div>
 
             <h3
               style={{
                 color: '#f8fafc',
-                fontSize: '1.28rem',
+                fontSize: '1.25rem',
                 fontWeight: 800,
                 marginBottom: '0.5rem',
                 position: 'relative',
                 zIndex: 1,
                 letterSpacing: '0.02em',
+                textTransform: 'uppercase',
               }}
             >
-              Physical camera connect nahi hai es field me abhi
+              Physical Camera Not Connected in this Sector
             </h3>
 
             <p
               style={{
                 color: '#94a3b8',
                 fontSize: '0.88rem',
-                maxWidth: 520,
-                lineHeight: 1.55,
+                maxWidth: 540,
+                lineHeight: 1.6,
                 marginBottom: '1.5rem',
                 position: 'relative',
                 zIndex: 1,
               }}
             >
-              Hardware sensor for <strong>{currentCam?.name || cameraId}</strong> is currently unmapped. Live optical surveillance is linked with your hardware camera on <strong>Sector 01 Gate</strong> & <strong>Sector 02 East Fence</strong>. Switch to them to monitor with your live camera.
+              No physical optical sensor is currently linked to <strong>{currentCam?.name || cameraId}</strong> in this deployment field. Active physical camera surveillance is routed through <strong>Sector 01 Gate</strong> and <strong>Sector 02 East Fence</strong>. Switch to active sectors to view your live camera or launch an automated simulation feed.
             </p>
 
             <div
@@ -1205,7 +1212,7 @@ export default function LiveVideoFeed({
                 }}
               >
                 <Video size={15} />
-                <span>Switch to Sector 01 (Live Cam)</span>
+                <span>Switch to Sector 01 (Live Camera)</span>
               </button>
               <button
                 onClick={() => onSelectCamera?.('CAM_02')}
@@ -1224,7 +1231,7 @@ export default function LiveVideoFeed({
                 }}
               >
                 <Video size={15} />
-                <span>Switch to Sector 02 (Live Cam)</span>
+                <span>Switch to Sector 02 (Live Camera)</span>
               </button>
               <button
                 onClick={() => handleStartVideoFeed(selectedVideo)}
@@ -1243,7 +1250,7 @@ export default function LiveVideoFeed({
                 }}
               >
                 <Play size={14} />
-                <span>Play Simulation Scenario</span>
+                <span>Launch Simulation Scenario</span>
               </button>
             </div>
           </div>
