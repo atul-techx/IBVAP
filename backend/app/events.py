@@ -254,18 +254,18 @@ def generate_tactical_summary_rule_based(event: dict[str, Any]) -> str:
     id_conf = event.get("identification_confidence")
     id_conf_pct = int(round(float(id_conf) * 100)) if id_conf is not None else None
 
-    if event_type == "zone_entry":
+    if event_type in ["zone_entry", "unauthorized_person", "unauthorized_vehicle"]:
         if object_class == "person":
             if identified_as and identified_as.strip() and identified_as.upper() != "UNKNOWN":
                 return f"Routine access: {identified_as} entered {location}."
-            return f"High alert: Unrecognized individual detected entering {location} (Track #{track_id}, {conf_pct}% confidence)."
+            return f"Unknown person in area detected at {location} (Track #{track_id}, {conf_pct}% confidence)."
         elif object_class in ["car", "truck", "bus", "motorcycle", "vehicle"]:
             auth_veh = check_authorized_vehicle(plate_number) if plate_number else None
             if auth_veh:
                 owner_tag = f" ({auth_veh.get('owner_name', 'Authorized Fleet')})"
                 return f"Routine access: Authorized vehicle [{plate_number}]{owner_tag} entered {location}."
             plate_tag = f" [Plate: {plate_number}]" if plate_number else " [Plate: UNVERIFIED]"
-            return f"High alert: UNAUTHORIZED VEHICLE intrusion ({object_class.upper()} #{track_id}{plate_tag}) detected entering {location} - verification dispatched."
+            return f"Unknown vehicle in area ({object_class.upper()} #{track_id}{plate_tag}) detected at {location}."
         else:
             return f"Unidentified target ({object_class} #{track_id}) crossed restricted boundary at {location} ({conf_pct}% confidence)."
     elif event_type == "zone_exit":

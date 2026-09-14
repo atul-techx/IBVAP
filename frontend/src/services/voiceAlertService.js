@@ -147,9 +147,20 @@ class VoiceAlertService {
 
     const eventType = (event.event_type || '').toLowerCase();
     const objectClass = (event.object_class || 'target').toLowerCase();
+    const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'vehicle'].includes(objectClass);
     const identifiedAs = event.identified_as && event.identified_as !== 'UNKNOWN' ? event.identified_as : null;
+    const isAuthVeh = Boolean(event.is_authorized_vehicle || (isVehicle && identifiedAs));
 
-    // 1. Behavioral Anomalies (Checked first: flags loitering/pacing even for authorized personnel)
+    // 1. Explicit unknown person & unknown vehicle detection alerts
+    if (eventType === 'unauthorized_person' || (objectClass === 'person' && !identifiedAs)) {
+      return 'Unknown person in area.';
+    }
+
+    if (eventType === 'unauthorized_vehicle' || (isVehicle && !isAuthVeh)) {
+      return 'Unknown vehicle in area.';
+    }
+
+    // 2. Behavioral Anomalies (Checked first: flags loitering/pacing even for authorized personnel)
     if (eventType === 'suspicious_loitering') {
       const subject = identifiedAs ? `Subject ${identifiedAs}` : '';
       return subject
@@ -161,23 +172,23 @@ class VoiceAlertService {
       return `Suspicious pacing behavior${subject} detected near ${location}.`;
     }
 
-    // 2. Watchlist Alert (if identified personnel on high alert / entry)
+    // 3. Watchlist Alert (if identified personnel / authorized vehicle)
     if (identifiedAs) {
-      if (eventType === 'zone_entry' && (event.severity === 'high' || event.severity === 'HIGH')) {
-        return `Watchlist alert: ${identifiedAs} detected at ${location}.`;
+      if (isVehicle) {
+        return `Authorized vehicle ${identifiedAs} verified in area.`;
       }
-      return `Routine access: ${identifiedAs} entered ${location}.`;
+      return `Watchlist alert: ${identifiedAs} detected at ${location}.`;
     }
 
-    // 3. Zone Intrusions / Access
+    // 4. Zone Intrusions / Access
     if (eventType === 'zone_entry') {
       if (objectClass === 'person') {
-        return `Person detected entering ${location}.`;
+        return 'Unknown person in area.';
       }
-      return `High alert: Vehicle ${objectClass} entered ${location}.`;
+      return 'Unknown vehicle in area.';
     }
 
-    // 4. Fallback: Clean existing tactical summary
+    // 5. Fallback: Clean existing tactical summary
     if (event.tactical_summary) {
       let clean = event.tactical_summary
         .replace(/\s*\(\s*\d+%\s*(confidence|match)?\s*\)/gi, '')
@@ -190,19 +201,19 @@ class VoiceAlertService {
       return clean;
     }
 
-    return `High alert: Security event detected at ${location}.`;
+    return `Security event detected at ${location}.`;
   }
 
   /**
    * Announce an incoming security event.
-   * Only processes events with severity: 'high'.
+   * Only processes high/critical/alert events.
    */
   announceEvent(event) {
     if (!event) return;
 
-    const severity = (event.severity || '').toLowerCase();
-    // Requirement 1: Only speak for severity: high events
-    if (severity !== 'high') {
+    const severity = (event.severity || 'high').toLowerCase();
+    // Skip routine low-priority events
+    if (severity === 'low') {
       return;
     }
 

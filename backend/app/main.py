@@ -1487,9 +1487,9 @@ async def process_client_frame(
         raise HTTPException(status_code=400, detail=f"Invalid frame data: {str(e)}")
 
     height, width = frame.shape[:2]
-    # Dedicated side perimeter corridor for webcam mode so sitting at desk does not trigger false alerts
-    # Corridor covers right 35% of the frame: [[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]]
-    webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
+    # Active perimeter surveillance zone for webcam mode covering central surveillance field:
+    # [[0.10, 0.08], [0.90, 0.08], [0.90, 0.92], [0.10, 0.92]]
+    webcam_poly = np.array([[0.10, 0.08], [0.90, 0.08], [0.90, 0.92], [0.10, 0.92]], dtype=np.float32)
     polygon = (webcam_poly * [width, height]).astype(np.int32)
 
     model = get_client_yolo_model()
@@ -1530,6 +1530,8 @@ async def process_client_frame(
                         poly_foot = cv2.pointPolygonTest(polygon, (float(foot_point[0]), float(foot_point[1])), False)
                         poly_center = cv2.pointPolygonTest(polygon, (float(center_point[0]), float(center_point[1])), False)
                         is_inside = (poly_foot >= 0 or poly_center >= 0)
+                    else:
+                        is_inside = True
 
                     if is_inside:
                         has_intrusion = True
@@ -1589,10 +1591,22 @@ async def process_client_frame(
         except Exception as det_err:
             print(f"[!] Warning running client YOLO detection: {det_err}")
 
+    # Check for unknown persons or unauthorized vehicles
+    has_unknown_person = any(
+        d["class_name"] == "person" and (not d.get("identified_as") or d.get("identified_as") == "UNKNOWN")
+        for d in detections
+    )
+    has_unknown_vehicle = any(
+        d["class_name"] in ["car", "bus", "truck", "motorcycle", "vehicle"] and not d.get("is_authorized_vehicle")
+        for d in detections
+    )
+    has_unknown_activity = has_unknown_person or has_unknown_vehicle
+    has_intrusion = has_intrusion or has_unknown_activity
+
     # Enqueue intrusion event with rate limiting (at most once every 3.5 seconds)
     now = time.time()
     last_logged = _LAST_CLIENT_INTRUSION_LOG.get(req.camera_id, 0)
-    if has_intrusion and (now - last_logged >= 3.5):
+    if (has_intrusion or has_unknown_activity) and (now - last_logged >= 3.5):
         _LAST_CLIENT_INTRUSION_LOG[req.camera_id] = now
         try:
             from backend.app.events import log_event_async
@@ -1602,15 +1616,21 @@ async def process_client_frame(
             except ImportError:
                 log_event_async = None
         if log_event_async:
-            primary_det = next((d for d in detections if d.get("in_zone")), detections[0] if detections else None)
+            primary_det = next(
+                (d for d in detections if (d["class_name"] == "person" and not d.get("identified_as")) or (d["class_name"] in ["car", "bus", "truck", "motorcycle", "vehicle"] and not d.get("is_authorized_vehicle")) or d.get("in_zone")),
+                detections[0] if detections else None,
+            )
             det_class = primary_det["class_name"] if primary_det else "person"
             det_track = primary_det["track_id"] if primary_det else 1
             det_bbox = [float(v) for v in primary_det["bbox"]] if primary_det else [0.0, 0.0, float(width), float(height)]
             det_conf = primary_det["confidence"] if primary_det else 0.85
             ident = primary_det.get("vehicle_owner") if primary_det.get("is_authorized_vehicle") else primary_det.get("identified_as")
+
+            evt_type = "unauthorized_vehicle" if det_class in ["car", "bus", "truck", "motorcycle", "vehicle"] and not primary_det.get("is_authorized_vehicle") else ("unauthorized_person" if not ident else "zone_entry")
+
             log_event_async(
                 camera_id=req.camera_id,
-                event_type="zone_entry",
+                event_type=evt_type,
                 object_class=det_class,
                 track_id=det_track,
                 frame_number=0,
@@ -1648,6 +1668,10 @@ async def process_client_frame(
         "polygon": webcam_poly.tolist(),
         "detections": detections,
         "has_intrusion": has_intrusion,
+        "has_unknown_person": has_unknown_person,
+        "has_unknown_vehicle": has_unknown_vehicle,
+        "unknown_person_count": sum(1 for d in detections if d["class_name"] == "person" and (not d.get("identified_as") or d.get("identified_as") == "UNKNOWN")),
+        "unknown_vehicle_count": sum(1 for d in detections if d["class_name"] in ["car", "bus", "truck", "motorcycle", "vehicle"] and not d.get("is_authorized_vehicle")),
         "occupancy": occupancy,
         "telemetry": {
             "fps": inference_fps,
