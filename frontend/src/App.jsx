@@ -15,7 +15,7 @@ import voiceAlertService from './services/voiceAlertService';
 import { ShieldAlert } from 'lucide-react';
 
 function DashboardContent() {
-  const { isAuthenticated, user, isLoading: isAuthLoading } = useAuth();
+  const { isAuthenticated, user, token, isLoading: isAuthLoading } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [stats, setStats] = useState(null);
@@ -30,6 +30,7 @@ function DashboardContent() {
   const [lastEventTime, setLastEventTime] = useState(null);
   const wsRef = useRef(null);
   const lastStatsFetchRef = useRef(0);
+  const seenEventIdsRef = useRef(new Set());
 
   // Subscribe to voice alert service state
   useEffect(() => {
@@ -117,8 +118,9 @@ function DashboardContent() {
 
     const connect = () => {
       if (isCleanedUp) return;
-      const wsUrl = `${WS_BASE}/ws/events`;
-      console.log('[WS] Connecting to', wsUrl);
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      const wsUrl = `${WS_BASE}/ws/events${tokenParam}`;
+      console.log('[WS] Connecting securely to', wsUrl.split('?')[0]);
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -181,13 +183,26 @@ function DashboardContent() {
           console.log('[WS] Received Live Security Event:', data.event_id, data.object_class, data.event_type);
           setLastEventTime(Date.now());
 
-          // Deduplicate by event_id before adding to state (capped to 40 items to prevent DOM bloat)
+          // Deduplicate by event_id synchronously using Ref so voice alerts are never missed
+          const eventId = data.event_id;
           let isNewEvent = false;
+          if (eventId) {
+            if (!seenEventIdsRef.current.has(eventId)) {
+              seenEventIdsRef.current.add(eventId);
+              if (seenEventIdsRef.current.size > 200) {
+                const oldest = seenEventIdsRef.current.values().next().value;
+                seenEventIdsRef.current.delete(oldest);
+              }
+              isNewEvent = true;
+            }
+          } else {
+            isNewEvent = true;
+          }
+
           setLiveEvents((prev) => {
             if (prev.some((e) => e.event_id === data.event_id)) {
               return prev;
             }
-            isNewEvent = true;
             return [data, ...prev].slice(0, 40);
           });
 
@@ -239,7 +254,7 @@ function DashboardContent() {
       }
       wsRef.current = null;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, token]);
 
   // If verifying auth config on initial boot
   if (isAuthLoading) {

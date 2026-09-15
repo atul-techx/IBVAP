@@ -25,6 +25,7 @@ class VoiceAlertService {
     this.listeners = new Set();
     this.watchdogTimer = null;
     this.isUnlocked = false;
+    this.activeUtterance = null;
 
     // Load persisted mute preference from localStorage if available
     try {
@@ -131,9 +132,10 @@ class VoiceAlertService {
 
   /**
    * Format structured event or tactical summary into concise, natural tactical speech.
+   * Returns null if no voice alert should be spoken (e.g. authorized personnel or authorized vehicles).
    */
   formatSpokenAlert(event) {
-    if (!event) return 'Security alert detected.';
+    if (!event) return null;
 
     const location =
       event.camera_name ||
@@ -147,9 +149,34 @@ class VoiceAlertService {
 
     const eventType = (event.event_type || '').toLowerCase();
     const objectClass = (event.object_class || 'target').toLowerCase();
+    const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'vehicle'].includes(objectClass);
     const identifiedAs = event.identified_as && event.identified_as !== 'UNKNOWN' ? event.identified_as : null;
 
-    // 1. Behavioral Anomalies (Checked first: flags loitering/pacing even for authorized personnel)
+    // Check authorization flags
+    const isAuthVeh = Boolean(
+      event.is_authorized_vehicle ||
+      event.is_authorized_plate ||
+      (isVehicle && (event.is_authorized || event.is_auth_veh || (identifiedAs && event.severity === 'low')))
+    );
+
+    const isAuthPerson = Boolean(
+      event.is_authorized_person ||
+      (eventType === 'authorized_person') ||
+      (eventType === 'authorized_entry' && !identifiedAs) ||
+      (event.is_authorized && !identifiedAs && !isVehicle)
+    );
+
+    // Rule 1: Authorized vehicle detected -> NEVER give voice alert (silent)
+    if (isVehicle && (isAuthVeh || event.is_authorized_vehicle || event.is_authorized)) {
+      return null;
+    }
+
+    // Rule 2: Authorized person detected -> NEVER give voice alert (silent)
+    if (isAuthPerson) {
+      return null;
+    }
+
+    // Rule 3: Behavioral Anomalies (Flags loitering/pacing)
     if (eventType === 'suspicious_loitering') {
       const subject = identifiedAs ? `Subject ${identifiedAs}` : '';
       return subject
@@ -161,24 +188,46 @@ class VoiceAlertService {
       return `Suspicious pacing behavior${subject} detected near ${location}.`;
     }
 
-    // 2. Watchlist Alert (if identified personnel on high alert / entry)
-    if (identifiedAs) {
-      if (eventType === 'zone_entry' && (event.severity === 'high' || event.severity === 'HIGH')) {
-        return `Watchlist alert: ${identifiedAs} detected at ${location}.`;
-      }
-      return `Routine access: ${identifiedAs} entered ${location}.`;
+    // Rule 4: Watchlist profile identified (e.g. Capt Rajesh Kumar or wanted suspect)
+    if (identifiedAs && !isVehicle) {
+      return `Watchlist match: ${identifiedAs} detected in area.`;
     }
 
-    // 3. Zone Intrusions / Access
+    // Rule 5: Explicit unknown person detection alert
+    if (eventType === 'unauthorized_person' || (objectClass === 'person' && !identifiedAs)) {
+      return 'Unknown person detected in area.';
+    }
+
+    // Rule 6: Explicit unknown vehicle detection alert
+    if (eventType === 'unauthorized_vehicle' || (isVehicle && !isAuthVeh)) {
+      return 'Unknown vehicle detected in area.';
+    }
+
+    // Rule 7: Zone Entry
     if (eventType === 'zone_entry') {
       if (objectClass === 'person') {
-        return `Person detected entering ${location}.`;
+        return identifiedAs
+          ? `Watchlist match: ${identifiedAs} detected in area.`
+          : 'Unknown person detected in area.';
       }
-      return `High alert: Vehicle ${objectClass} entered ${location}.`;
+      if (isVehicle) {
+        return isAuthVeh ? null : 'Unknown vehicle detected in area.';
+      }
     }
 
-    // 4. Fallback: Clean existing tactical summary
-    if (event.tactical_summary) {
+    // Rule 8: General fallbacks
+    if (objectClass === 'person') {
+      return identifiedAs
+        ? `Watchlist match: ${identifiedAs} detected in area.`
+        : 'Unknown person detected in area.';
+    }
+
+    if (isVehicle) {
+      return isAuthVeh ? null : 'Unknown vehicle detected in area.';
+    }
+
+    // Fallback: Clean existing tactical summary if not authorized
+    if (event.tactical_summary && !isAuthVeh && !isAuthPerson) {
       let clean = event.tactical_summary
         .replace(/\s*\(\s*\d+%\s*(confidence|match)?\s*\)/gi, '')
         .replace(/\s*\(Track\s*#\d+\)/gi, '')
@@ -190,27 +239,39 @@ class VoiceAlertService {
       return clean;
     }
 
-    return `High alert: Security event detected at ${location}.`;
+    return null;
   }
 
   /**
    * Announce an incoming security event.
-   * Only processes events with severity: 'high'.
+   * - Speaks for unknown person & unknown vehicle ("Unknown person detected in area." / "Unknown vehicle detected in area.")
+   * - Speaks for watchlist profile identification ("Watchlist match: <Identity> detected in area.")
+   * - Speaks for behavioral anomalies (loitering / pacing)
+   * - NEVER speaks for authorized personnel or authorized vehicles
    */
   announceEvent(event) {
-    if (!event) return;
-
-    const severity = (event.severity || '').toLowerCase();
-    // Requirement 1: Only speak for severity: high events
-    if (severity !== 'high') {
-      return;
-    }
-
-    if (this.muted) {
-      return;
-    }
+    if (!event || this.muted) return;
 
     const spokenText = this.formatSpokenAlert(event);
+    if (!spokenText) {
+      // Authorized person, authorized vehicle, or routine non-alert event -> remain silent
+      return;
+    }
+
+    const severity = (event.severity || 'high').toLowerCase();
+    const objectClass = (event.object_class || 'target').toLowerCase();
+    const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'vehicle'].includes(objectClass);
+    const isWatchlistMatch = Boolean(
+      event.identified_as &&
+      event.identified_as !== 'UNKNOWN' &&
+      !isVehicle
+    );
+
+    // Speak if it is a high-severity alert (unknown person/vehicle, anomaly) or a watchlist match
+    if (severity !== 'high' && !isWatchlistMatch) {
+      return;
+    }
+
     this.enqueue(spokenText);
   }
 
@@ -283,8 +344,15 @@ class VoiceAlertService {
     this.notifySubscribers();
 
     try {
-      // Create utterance
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      }
+
+      // Create utterance and hold instance reference to prevent V8 garbage collection mid-speech
       const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      this.activeUtterance = utterance;
       utterance.lang = 'en-US';
       utterance.rate = 1.02;  // Crisp, professional tactical pace
       utterance.pitch = 1.0;
@@ -339,6 +407,7 @@ class VoiceAlertService {
    * Handle completion of an utterance and schedule next queue item.
    */
   onSpeechFinished() {
+    this.activeUtterance = null;
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;
@@ -358,6 +427,7 @@ class VoiceAlertService {
    */
   cancelAll() {
     this.speechQueue = [];
+    this.activeUtterance = null;
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;

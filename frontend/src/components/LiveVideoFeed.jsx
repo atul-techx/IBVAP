@@ -62,6 +62,8 @@ export default function LiveVideoFeed({
   const [isWebcamMirror, setIsWebcamMirror] = useState(true);
   const [clientDetections, setClientDetections] = useState([]);
   const [clientHasIntrusion, setClientHasIntrusion] = useState(false);
+  const [clientUnknownPersonCount, setClientUnknownPersonCount] = useState(0);
+  const [clientUnknownVehicleCount, setClientUnknownVehicleCount] = useState(0);
   const [clientTelemetry, setClientTelemetry] = useState({ fps: 0, occupancy: 0 });
 
   const videoContainerRef = useRef(null);
@@ -71,6 +73,7 @@ export default function LiveVideoFeed({
   const webcamStreamRef = useRef(null);
   const webcamIntervalRef = useRef(null);
   const isSendingFrameRef = useRef(false);
+  const lastWebcamAlertTimeRef = useRef(0);
   const showZoneRef = useRef(showZone);
   showZoneRef.current = showZone;
 
@@ -120,13 +123,13 @@ export default function LiveVideoFeed({
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Draw Virtual Fence Polygon on the right side
+    // 1. Draw Virtual Fence Polygon across central surveillance field
     if (zoneActive) {
       const poly = [
-        [0.62 * w, 0.12 * h],
-        [0.96 * w, 0.12 * h],
-        [0.96 * w, 0.88 * h],
-        [0.62 * w, 0.88 * h],
+        [0.10 * w, 0.08 * h],
+        [0.90 * w, 0.08 * h],
+        [0.90 * w, 0.92 * h],
+        [0.10 * w, 0.92 * h],
       ];
 
       ctx.save();
@@ -160,9 +163,9 @@ export default function LiveVideoFeed({
       ctx.font = 'bold 12px monospace';
       ctx.fillStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
       ctx.fillText(
-        hasIntrusion ? '⚠ ALERT: VIRTUAL FENCE INTRUSION' : '🛡 ZONE: POLYGON α (PERIMETER)',
-        0.62 * w + 8,
-        0.12 * h - 8
+        hasIntrusion ? '⚠ ALERT: ACTIVE PERIMETER DETECTION' : '🛡 ZONE: POLYGON α (PERIMETER ACTIVE)',
+        0.10 * w + 8,
+        0.08 * h - 8
       );
       ctx.restore();
     }
@@ -176,27 +179,26 @@ export default function LiveVideoFeed({
       const bw = (nx2 - nx1) * w;
       const bh = (ny2 - ny1) * h;
 
+      const isPerson = det.class_name?.toLowerCase() === 'person';
       const isVehicle = ['car', 'bus', 'truck', 'motorcycle', 'vehicle'].includes(det.class_name?.toLowerCase());
+      const isAuthPerson = isPerson && det.identified_as && det.identified_as !== 'UNKNOWN';
+      const isUnknownPerson = isPerson && !isAuthPerson;
       const isAuthVeh = isVehicle && det.is_authorized_vehicle;
       const isUnauthVeh = isVehicle && !det.is_authorized_vehicle;
       const isInZone = det.in_zone;
 
       let boxColor = '#38bdf8';
-      if (isAuthVeh) {
-        boxColor = '#10b981'; // Green for authorized vehicle
-      } else if (isUnauthVeh) {
-        boxColor = '#ef4444'; // Red for unauthorized vehicle
-      } else if (isInZone) {
-        boxColor = '#ef4444'; // Red for intrusion
-      } else if (det.identified_as && det.identified_as !== 'UNKNOWN') {
-        boxColor = '#10b981'; // Green for identified team member
+      if (isAuthVeh || isAuthPerson) {
+        boxColor = '#10b981'; // Green for authorized
+      } else if (isUnknownPerson || isUnauthVeh || isInZone) {
+        boxColor = '#ef4444'; // Red alert for unknown persons or unauthorized vehicles
       }
 
       ctx.save();
       ctx.lineWidth = 2;
       ctx.strokeStyle = boxColor;
       ctx.shadowColor = boxColor;
-      ctx.shadowBlur = (isInZone || isUnauthVeh) ? 14 : 6;
+      ctx.shadowBlur = (isInZone || isUnauthVeh || isUnknownPerson) ? 14 : 6;
       ctx.strokeRect(x1, y1, bw, bh);
 
       // Corner reticles
@@ -233,17 +235,19 @@ export default function LiveVideoFeed({
         statusTag = ` [AUTHORIZED: ${det.vehicle_owner || 'FLEET'}]`;
       } else if (isUnauthVeh) {
         statusTag = ' [UNAUTHORIZED VEHICLE]';
+      } else if (isAuthPerson) {
+        statusTag = ` [AUTHORIZED: ${det.identified_as}]`;
+      } else if (isUnknownPerson) {
+        statusTag = ' [UNKNOWN PERSON]';
       } else if (isInZone) {
         statusTag = ' [INTRUSION]';
-      } else if (det.identified_as && det.identified_as !== 'UNKNOWN') {
-        statusTag = ` [${det.identified_as}]`;
       }
 
       const plateTag = det.plate_number ? ` [PLATE: ${det.plate_number}]` : (isVehicle ? ' [PLATE: UNVERIFIED]' : '');
       const labelText = `${det.class_name.toUpperCase()} #${det.track_id} (${Math.round(det.confidence * 100)}%)${statusTag}${plateTag}`;
       ctx.font = 'bold 11px monospace';
       const textWidth = ctx.measureText(labelText).width;
-      ctx.fillStyle = (isInZone || isUnauthVeh) ? 'rgba(239, 68, 68, 0.92)' : (isAuthVeh ? 'rgba(16, 185, 129, 0.92)' : 'rgba(15, 23, 42, 0.88)');
+      ctx.fillStyle = (isInZone || isUnauthVeh || isUnknownPerson) ? 'rgba(239, 68, 68, 0.95)' : (isAuthVeh || isAuthPerson ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.88)');
       ctx.fillRect(x1, Math.max(0, y1 - 21), textWidth + 12, 20);
       ctx.strokeStyle = boxColor;
       ctx.lineWidth = 1;
@@ -324,20 +328,58 @@ export default function LiveVideoFeed({
         });
 
         if (res?.status === 'success') {
-          setClientDetections(res.detections || []);
-          setClientHasIntrusion(res.has_intrusion || false);
+          const detections = res.detections || [];
+          setClientDetections(detections);
+
+          const unknownPersons = detections.filter(
+            (d) => d.class_name?.toLowerCase() === 'person' && (!d.identified_as || d.identified_as === 'UNKNOWN')
+          );
+          const isVehicleClass = (cls) => ['car', 'truck', 'bus', 'motorcycle', 'vehicle'].includes(cls?.toLowerCase());
+          const unknownVehicles = detections.filter(
+            (d) => isVehicleClass(d.class_name) && !d.is_authorized_vehicle
+          );
+
+          setClientUnknownPersonCount(unknownPersons.length);
+          setClientUnknownVehicleCount(unknownVehicles.length);
+
+          const hasUnknownActivity = unknownPersons.length > 0 || unknownVehicles.length > 0;
+          const hasIntrusion = res.has_intrusion || hasUnknownActivity;
+          setClientHasIntrusion(hasIntrusion);
+
           if (res.telemetry) {
             setClientTelemetry(res.telemetry);
           }
 
-          drawClientOverlay(canvas, vw, vh, res.detections || [], res.has_intrusion || false, showZoneRef.current);
+          drawClientOverlay(canvas, vw, vh, detections, hasIntrusion, showZoneRef.current);
 
-          if (res.has_intrusion) {
+          // Real-time Voice Alert Trigger with 4.5s throttle to avoid speech congestion
+          const now = Date.now();
+          if (unknownPersons.length > 0 && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+            lastWebcamAlertTimeRef.current = now;
+            voiceAlertService.announceEvent({
+              event_type: 'unauthorized_person',
+              object_class: 'person',
+              severity: 'high',
+              camera_id: cameraId,
+              tactical_summary: 'Unknown person in area',
+            });
+          } else if (unknownVehicles.length > 0 && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+            lastWebcamAlertTimeRef.current = now;
+            voiceAlertService.announceEvent({
+              event_type: 'unauthorized_vehicle',
+              object_class: 'vehicle',
+              severity: 'high',
+              camera_id: cameraId,
+              tactical_summary: 'Unknown vehicle in area',
+            });
+          } else if (res.has_intrusion && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+            lastWebcamAlertTimeRef.current = now;
             voiceAlertService.announceEvent({
               event_type: 'zone_entry',
               object_class: 'person',
               severity: 'high',
               camera_id: cameraId,
+              tactical_summary: 'Unknown person in area',
             });
           }
         }
@@ -1405,12 +1447,12 @@ export default function LiveVideoFeed({
             <span className="hud-val">{showZone ? 'POLYGON α' : 'MUTED'}</span>
           </div>
           <div className="hud-metric">
-            <Users size={12} style={{ color: streamMode === 'no_physical_camera' ? '#94a3b8' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399') }} />
+            <Users size={12} style={{ color: streamMode === 'no_physical_camera' ? '#94a3b8' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? (clientUnknownPersonCount > 0 || clientUnknownVehicleCount > 0 || clientHasIntrusion) : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399') }} />
             <span className="hud-label">STATUS:</span>
             <span
               className="hud-val"
               style={{
-                color: streamMode === 'no_physical_camera' ? '#fbbf24' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399'),
+                color: streamMode === 'no_physical_camera' ? '#fbbf24' : manuallyStopped ? '#64748b' : ((streamMode === 'browser_webcam' ? (clientUnknownPersonCount > 0 || clientUnknownVehicleCount > 0 || clientHasIntrusion) : camTelemetry.occupancy > 0) ? '#f87171' : '#34d399'),
                 fontWeight: 800,
                 letterSpacing: '0.04em',
               }}
@@ -1419,8 +1461,16 @@ export default function LiveVideoFeed({
                 ? 'SENSOR OFFLINE'
                 : manuallyStopped
                 ? 'CAMERA OFF'
-                : ((streamMode === 'browser_webcam' ? clientHasIntrusion : camTelemetry.occupancy > 0)
-                  ? `INTRUSION (${streamMode === 'browser_webcam' ? (clientTelemetry.occupancy || 1) : camTelemetry.occupancy})`
+                : streamMode === 'browser_webcam'
+                ? (clientUnknownPersonCount > 0
+                  ? `UNKNOWN PERSON IN AREA (${clientUnknownPersonCount})`
+                  : clientUnknownVehicleCount > 0
+                  ? `UNKNOWN VEHICLE IN AREA (${clientUnknownVehicleCount})`
+                  : clientHasIntrusion
+                  ? `ZONE INTRUSION (${clientTelemetry.occupancy || 1})`
+                  : 'SECTOR CLEAR')
+                : (camTelemetry.occupancy > 0
+                  ? `TARGET DETECTED (${camTelemetry.occupancy})`
                   : 'SECTOR CLEAR')}
             </span>
           </div>

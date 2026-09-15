@@ -107,23 +107,80 @@ async function runTests() {
     };
     const textPerson = voiceAlertService.formatSpokenAlert(eventPerson);
     assert(
-      textPerson.includes('Person detected entering Sector 4 Gate') && !textPerson.includes('94%'),
-      'Person intrusion formats concisely without percentages'
+      textPerson === 'Unknown person detected in area.' && !textPerson.includes('94%'),
+      'Person intrusion formats as: Unknown person detected in area.'
     );
 
-    const eventWatchlist = {
+    const eventVehicle = {
+      event_type: 'zone_entry',
+      object_class: 'car',
+      camera_id: 'CAM_01',
+      severity: 'high',
+    };
+    const textVehicle = voiceAlertService.formatSpokenAlert(eventVehicle);
+    assert(
+      textVehicle === 'Unknown vehicle detected in area.',
+      'Vehicle intrusion formats as: Unknown vehicle detected in area.'
+    );
+
+    // Watchlist match (Capt Rajesh Kumar)
+    const eventWatchlistCapt = {
       event_type: 'zone_entry',
       object_class: 'person',
       camera_id: 'CAM_01',
       camera_name: 'Sector 4 Gate',
-      identified_as: 'Alex Smith',
-      identification_confidence: 0.92,
+      identified_as: 'Capt Rajesh Kumar',
+      identification_confidence: 0.95,
+      severity: 'low',
+    };
+    const textWatchlistCapt = voiceAlertService.formatSpokenAlert(eventWatchlistCapt);
+    assert(
+      textWatchlistCapt === 'Watchlist match: Capt Rajesh Kumar detected in area.',
+      'Watchlist detection formats as: Watchlist match: Capt Rajesh Kumar detected in area.'
+    );
+
+    // Watchlist match (Wanted Suspect)
+    const eventWatchlistSuspect = {
+      event_type: 'zone_entry',
+      object_class: 'person',
+      camera_id: 'CAM_02',
+      identified_as: 'Wanted Suspect #402',
       severity: 'high',
     };
-    const textWatchlist = voiceAlertService.formatSpokenAlert(eventWatchlist);
+    const textWatchlistSuspect = voiceAlertService.formatSpokenAlert(eventWatchlistSuspect);
     assert(
-      textWatchlist.includes('Watchlist alert: Alex Smith detected at Sector 4 Gate'),
-      'Watchlist detection formats concise alert with matched profile identity'
+      textWatchlistSuspect === 'Watchlist match: Wanted Suspect #402 detected in area.',
+      'Watchlist detection formats as: Watchlist match: Wanted Suspect #402 detected in area.'
+    );
+
+    // Authorized Vehicle -> MUST BE SILENT (null)
+    const eventAuthVeh = {
+      event_type: 'zone_entry',
+      object_class: 'car',
+      camera_id: 'CAM_01',
+      plate_number: 'JK02AB1234',
+      is_authorized_vehicle: true,
+      identified_as: 'Patrol Vehicle Unit 1',
+      severity: 'low',
+    };
+    const textAuthVeh = voiceAlertService.formatSpokenAlert(eventAuthVeh);
+    assert(
+      textAuthVeh === null,
+      'Authorized vehicle is SILENT (formatSpokenAlert returns null)'
+    );
+
+    // Authorized Person -> MUST BE SILENT (null)
+    const eventAuthPerson = {
+      event_type: 'authorized_person',
+      object_class: 'person',
+      camera_id: 'CAM_01',
+      is_authorized_person: true,
+      severity: 'low',
+    };
+    const textAuthPerson = voiceAlertService.formatSpokenAlert(eventAuthPerson);
+    assert(
+      textAuthPerson === null,
+      'Authorized person is SILENT (formatSpokenAlert returns null)'
     );
 
     const eventLoiter = {
@@ -153,13 +210,36 @@ async function runTests() {
     );
   }
 
-  // --- Test 2: Severity Filtering ---
-  console.log('\n--- Test Group 2: Severity Filtering (HIGH only) ---');
+  // --- Test 2: Severity & Priority Filtering ---
+  console.log('\n--- Test Group 2: Severity & Threat Filtering ---');
   {
     window.speechSynthesis.spokenLog = [];
     voiceAlertService.setMuted(false);
+    voiceAlertService.lastSpokenTimestamp = 0;
 
-    // LOW severity event (Zone Exit)
+    // Authorized vehicle MUST NOT trigger speech announcement
+    voiceAlertService.announceEvent({
+      event_id: 'ev-auth-veh-1',
+      event_type: 'zone_entry',
+      object_class: 'car',
+      is_authorized_vehicle: true,
+      severity: 'low',
+      camera_id: 'CAM_01',
+    });
+    assert(window.speechSynthesis.spokenLog.length === 0, 'Authorized vehicle does NOT trigger speech');
+
+    // Authorized person MUST NOT trigger speech announcement
+    voiceAlertService.announceEvent({
+      event_id: 'ev-auth-person-1',
+      event_type: 'authorized_person',
+      object_class: 'person',
+      is_authorized_person: true,
+      severity: 'low',
+      camera_id: 'CAM_01',
+    });
+    assert(window.speechSynthesis.spokenLog.length === 0, 'Authorized person does NOT trigger speech');
+
+    // Routine LOW severity event (Zone Exit)
     voiceAlertService.announceEvent({
       event_id: 'ev-low-1',
       event_type: 'zone_exit',
@@ -167,28 +247,61 @@ async function runTests() {
       severity: 'low',
       camera_id: 'CAM_01',
     });
-    assert(window.speechSynthesis.spokenLog.length === 0, 'LOW severity event does NOT trigger speech');
+    assert(window.speechSynthesis.spokenLog.length === 0, 'Routine LOW severity event does NOT trigger speech');
 
-    // MEDIUM severity event (Vehicle Entry)
+    // Watchlist match (Capt Rajesh Kumar) triggers speech even if backend logged as low
     voiceAlertService.announceEvent({
-      event_id: 'ev-med-1',
+      event_id: 'ev-wl-capt',
       event_type: 'zone_entry',
-      object_class: 'car',
-      severity: 'medium',
+      object_class: 'person',
+      identified_as: 'Capt Rajesh Kumar',
+      severity: 'low',
       camera_id: 'CAM_01',
     });
-    assert(window.speechSynthesis.spokenLog.length === 0, 'MEDIUM severity event does NOT trigger speech');
+    assert(
+      window.speechSynthesis.spokenLog.length === 1 &&
+      window.speechSynthesis.spokenLog[0].text === 'Watchlist match: Capt Rajesh Kumar detected in area.',
+      'Watchlist profile (Capt Rajesh Kumar) triggers exact tactical voice alert'
+    );
 
-    // HIGH severity event (Person Intrusion)
+    // Reset log and active speaking state for next test
+    window.speechSynthesis.spokenLog = [];
+    voiceAlertService.cancelAll();
+    voiceAlertService.lastSpokenTimestamp = 0;
+
+    // HIGH severity event (Unknown Person Intrusion)
     voiceAlertService.announceEvent({
       event_id: 'ev-high-1',
-      event_type: 'zone_entry',
+      event_type: 'unauthorized_person',
       object_class: 'person',
       severity: 'high',
       camera_id: 'CAM_01',
       camera_name: 'Sector 4 Gate',
     });
-    assert(window.speechSynthesis.spokenLog.length === 1, 'HIGH severity event triggers speech announcement');
+    assert(
+      window.speechSynthesis.spokenLog.length === 1 &&
+      window.speechSynthesis.spokenLog[0].text === 'Unknown person detected in area.',
+      'Unknown person intrusion triggers: Unknown person detected in area.'
+    );
+
+    // Reset log and active speaking state for next test
+    window.speechSynthesis.spokenLog = [];
+    voiceAlertService.cancelAll();
+    voiceAlertService.lastSpokenTimestamp = 0;
+
+    // HIGH severity event (Unknown Vehicle Intrusion)
+    voiceAlertService.announceEvent({
+      event_id: 'ev-high-veh-1',
+      event_type: 'unauthorized_vehicle',
+      object_class: 'car',
+      severity: 'high',
+      camera_id: 'CAM_01',
+    });
+    assert(
+      window.speechSynthesis.spokenLog.length === 1 &&
+      window.speechSynthesis.spokenLog[0].text === 'Unknown vehicle detected in area.',
+      'Unknown vehicle intrusion triggers: Unknown vehicle detected in area.'
+    );
   }
 
   // --- Test 3: Mute & Unmute Toggle ---

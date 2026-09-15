@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Query, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # Cryptographic and JWT Configuration
@@ -148,9 +148,9 @@ def init_users_table(db_path: Optional[Path] = None) -> Path:
     if seeded_any:
         print("\n" + "=" * 65)
         print(" [AUTH] IBVAP Role-Based Access Control Initialized")
-        print(" Seeded Default Accounts:")
+        print(" Default Accounts Seeded:")
         for u in DEFAULT_USERS:
-            print(f"   * Role '{u['role'].upper():<8}': username='{u['username']}', password='{u['password']}'")
+            print(f"   * Role '{u['role'].upper():<8}': username='{u['username']}' [Password Configured]")
         print("=" * 65 + "\n")
 
     return db_path
@@ -213,6 +213,22 @@ def authenticate_user(username: str, password: str, db_path: Optional[Path] = No
 # =====================================================================
 # FastAPI Dependencies
 # =====================================================================
+def verify_token_str(token: str) -> Optional[Dict[str, Any]]:
+    """Decode and validate a raw token string returning identity dict or None."""
+    payload = decode_access_token(token)
+    if not payload:
+        return None
+    username = payload.get("sub")
+    if not username:
+        return None
+    return {
+        "username": username,
+        "role": payload.get("role", "operator"),
+        "full_name": payload.get("name", username),
+        "auth_disabled": False,
+    }
+
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security_scheme),
 ) -> Dict[str, Any]:
@@ -235,29 +251,55 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    if not payload:
+    user = verify_token_str(credentials.credentials)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session token. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    username: Optional[str] = payload.get("sub")
-    if not username:
+    return user
+
+
+async def get_current_user_flexible(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security_scheme),
+    token: Optional[str] = Query(None, description="Access token for browser media/stream requests"),
+) -> Dict[str, Any]:
+    """
+    Validates token either via HTTP Bearer header OR via '?token=...' query parameter.
+    Allows standard browser <img>, <video>, and direct downloads to access protected assets.
+    """
+    if is_auth_disabled():
+        return {
+            "username": "demo_admin",
+            "role": "admin",
+            "full_name": "Demo Admin (Bypass Mode)",
+            "auth_disabled": True,
+        }
+
+    raw_token = None
+    if credentials and credentials.credentials:
+        raw_token = credentials.credentials
+    elif token:
+        raw_token = token
+
+    if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Malformed token payload.",
+            detail="Authentication required. Missing Bearer token or token parameter.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return {
-        "username": username,
-        "role": payload.get("role", "operator"),
-        "full_name": payload.get("name", username),
-        "auth_disabled": False,
-    }
+    user = verify_token_str(raw_token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
 
 
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -268,3 +310,4 @@ def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> D
             detail="Administrative privileges required for this action.",
         )
     return current_user
+

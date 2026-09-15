@@ -84,7 +84,9 @@ export async function fetchAuthConfig() {
 }
 
 export function getLiveFeedUrl(cameraId = 'CAM_01') {
-  return `${API_BASE}/api/live-feed/${cameraId}`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/live-feed/${cameraId}${qs}`;
 }
 
 export async function fetchStats() {
@@ -127,15 +129,21 @@ export async function fetchEvents(params = {}) {
 }
 
 export function getEventSnapshotUrl(eventId) {
-  return `${API_BASE}/api/events/${eventId}/snapshot`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/snapshots/${eventId}${qs}`;
 }
 
 export function getEventCropUrl(eventId) {
-  return `${API_BASE}/api/events/${eventId}/crop`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/events/${eventId}/crop${qs}`;
 }
 
 export function getEventReplayUrl(eventId) {
-  return `${API_BASE}/api/events/${eventId}/replay`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/events/${eventId}/replay${qs}`;
 }
 
 export async function fetchAuditVerification() {
@@ -163,11 +171,15 @@ export async function fetchEventById(eventId) {
 }
 
 export function getSnapshotUrl(eventId) {
-  return `${API_BASE}/api/snapshots/${eventId}`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/snapshots/${eventId}${qs}`;
 }
 
 export function getReplayVideoUrl(eventId, windowSeconds = 3.0) {
-  return `${API_BASE}/api/events/${eventId}/replay?window=${windowSeconds}`;
+  const token = getAuthToken();
+  const tokenPart = token ? `&token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/events/${eventId}/replay?window=${windowSeconds}${tokenPart}`;
 }
 
 export async function fetchReplayMeta(eventId, windowSeconds = 3.0) {
@@ -272,7 +284,9 @@ export async function verifyAuditTrail() {
 
 export function getWatchlistPhotoUrl(filename) {
   if (!filename) return '';
-  return `${API_BASE}/api/admin/watchlist/photo/${encodeURIComponent(filename)}`;
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/admin/watchlist/photo/${encodeURIComponent(filename)}${qs}`;
 }
 
 export async function fetchWatchlist() {
