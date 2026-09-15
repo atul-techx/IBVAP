@@ -60,6 +60,7 @@ try:
         log_auth_event,
         purge_expired_events,
         register_event_listener,
+        sign_event_block,
         start_event_retention_daemon,
         verify_chain_integrity,
     )
@@ -67,9 +68,11 @@ try:
         authenticate_user,
         create_access_token,
         get_current_user,
+        get_current_user_flexible,
         is_auth_disabled,
         require_admin,
         update_user_last_login,
+        verify_token_str,
     )
     from backend.app.admin_management import (
         add_or_update_authorized_vehicle,
@@ -104,6 +107,7 @@ except ImportError:
         log_auth_event,
         purge_expired_events,
         register_event_listener,
+        sign_event_block,
         start_event_retention_daemon,
         verify_chain_integrity,
     )
@@ -111,9 +115,11 @@ except ImportError:
         authenticate_user,
         create_access_token,
         get_current_user,
+        get_current_user_flexible,
         is_auth_disabled,
         require_admin,
         update_user_last_login,
+        verify_token_str,
     )
     from admin_management import (
         add_or_update_authorized_vehicle,
@@ -208,10 +214,31 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Enable CORS for all origins during development
+def sanitize_stream_source(source: Any) -> str:
+    """Mask credentials in RTSP / HTTP camera URLs (e.g. rtsp://user:pass@host -> rtsp://user:***@host)."""
+    if not isinstance(source, str):
+        return str(source) if source is not None else ""
+    return re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", source)
+
+
+# Configure Secure CORS policy
+raw_cors = os.environ.get("ALLOWED_ORIGINS")
+if raw_cors:
+    cors_origins = [o.strip() for o in raw_cors.split(",") if o.strip()]
+else:
+    cors_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|.*\.onrender\.com|.*\.up\.railway\.app|.*\.vercel\.app)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -807,7 +834,10 @@ def get_watchlist_template(
 
 
 @app.get("/api/admin/watchlist/photo/{filename}")
-def get_watchlist_photo(filename: str):
+def get_watchlist_photo(
+    filename: str,
+    current_user: dict = Depends(get_current_user_flexible),
+):
     """Serve photo thumbnail for admin watchlist management with fallback to Cloudinary CDN or default avatar."""
     clean_filename = Path(filename).name
     photo_path = get_watchlist_dir() / clean_filename
@@ -1008,7 +1038,10 @@ def get_cameras(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/snapshots/{event_id}")
-def get_snapshot_image(event_id: str):
+def get_snapshot_image(
+    event_id: str,
+    current_user: dict = Depends(get_current_user_flexible),
+):
     """Serve the JPEG snapshot image for a given event ID."""
     snapshots_dir = get_snapshots_dir()
     snapshot_path = snapshots_dir / f"{event_id}.jpg"
@@ -1032,6 +1065,7 @@ def get_incident_replay(
     event_id: str,
     format: str = Query("video", description="Format: 'video' for MP4 stream, 'json' for forensic metadata"),
     window: float = Query(3.0, description="Window size in seconds before and after the event (default: 3.0s)"),
+    current_user: dict = Depends(get_current_user_flexible),
 ):
     """
     Extract and serve a forensic sub-clip (T-3s to T+3s) around a security event.
@@ -1060,7 +1094,10 @@ def get_incident_replay(
 
 
 @app.get("/api/events/{event_id}/crop")
-def get_event_target_crop(event_id: str):
+def get_event_target_crop(
+    event_id: str,
+    current_user: dict = Depends(get_current_user_flexible),
+):
     """Serve cropped high-resolution target ROI (face, plate, or body) for forensic zoom inspection."""
     success, jpeg_bytes, meta = extract_event_target_crop(event_id)
     if not success or not jpeg_bytes:
@@ -1115,10 +1152,13 @@ def get_audit_certificate(current_user: dict = Depends(get_current_user)):
         "is_valid": is_valid,
         "cryptographic_specification": {
             "algorithm": "SHA-256 Chained Hash Ledger (Genesis Block Anchored)",
+            "digital_signature_algorithm": "HMAC-SHA256 Command Authority Digital Seal",
             "genesis_block_hash": genesis_hash,
             "latest_block_hash": latest_hash,
             "total_blocks_verified": total_checked,
+            "signature_seal": sign_event_block(genesis_hash or "GENESIS", latest_hash or "LATEST", now_utc, "COMMAND_HQ"),
         },
+        "command_authority_signature_seal": sign_event_block(genesis_hash or "GENESIS", latest_hash or "LATEST", now_utc, "COMMAND_HQ"),
         "forensic_audit_details": audit_res,
         "compliance_statement": (
             "This digital certificate attests that all surveillance intrusion records, biometric face identifications, "
@@ -1309,7 +1349,11 @@ async def mjpeg_frame_generator(camera_id: str, request: Optional[Request] = Non
 
 
 @app.get("/api/live-feed/{camera_id}")
-async def get_live_feed(camera_id: str = "CAM_01", request: Request = None):
+async def get_live_feed(
+    camera_id: str = "CAM_01",
+    request: Request = None,
+    current_user: dict = Depends(get_current_user_flexible),
+):
     """
     Stream real-time MJPEG video feed for standard browser <img> tags.
     Continuously streams annotated detection and tracking frames from the analytics pipeline.
@@ -1329,7 +1373,10 @@ async def get_live_feed(camera_id: str = "CAM_01", request: Request = None):
 
 
 @app.get("/api/live-feed/{camera_id}/frame")
-async def get_live_frame_snapshot(camera_id: str = "CAM_01"):
+async def get_live_frame_snapshot(
+    camera_id: str = "CAM_01",
+    current_user: dict = Depends(get_current_user_flexible),
+):
     """Fetch the single latest JPEG frame instantly with zero browser caching."""
     hub = get_frame_hub()
     if hub is not None:
@@ -1736,11 +1783,12 @@ async def start_camera_stream(
         show_zone=req.show_zone,
     )
 
+    safe_source = sanitize_stream_source(req.source)
     await ws_manager.broadcast_json({
         "type": "stream_started",
         "camera_id": cam_id,
         "source_type": req.source_type,
-        "source": req.source,
+        "source": safe_source,
         "pid": proc.pid,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
@@ -1749,7 +1797,7 @@ async def start_camera_stream(
         "status": "started",
         "camera_id": cam_id,
         "source_type": req.source_type,
-        "source": req.source,
+        "source": safe_source,
         "pid": proc.pid,
         "message": f"Camera '{cam_id}' ({req.source_type}) started in continuous surveillance loop.",
     }
@@ -1840,9 +1888,31 @@ def trigger_pipeline_run(background_tasks: BackgroundTasks, current_user: dict =
     }
 
 
+INTERNAL_BROADCAST_KEY = os.environ.get("IBVAP_INTERNAL_KEY", "ibvap_internal_process_broadcast_secret_2026")
+
+
 @app.post("/api/internal/broadcast")
-async def internal_broadcast_event(event: dict[str, Any]):
+async def internal_broadcast_event(
+    request: Request,
+    event: dict[str, Any],
+):
     """Internal webhook endpoint for external detection processes to trigger WebSocket broadcasts."""
+    key = request.headers.get("X-Internal-Key")
+    if key == INTERNAL_BROADCAST_KEY:
+        await ws_manager.broadcast_json(event)
+        return {"status": "broadcast_queued", "clients": len(ws_manager.active_connections)}
+
+    auth_hdr = request.headers.get("Authorization", "")
+    token = request.query_params.get("token")
+    raw_tok = None
+    if auth_hdr.startswith("Bearer "):
+        raw_tok = auth_hdr.split(" ", 1)[1]
+    elif token:
+        raw_tok = token
+
+    if not raw_tok or not verify_token_str(raw_tok):
+        raise HTTPException(status_code=401, detail="Authentication required for external broadcast callers.")
+
     await ws_manager.broadcast_json(event)
     return {"status": "broadcast_queued", "clients": len(ws_manager.active_connections)}
 
@@ -1851,11 +1921,26 @@ async def internal_broadcast_event(event: dict[str, Any]):
 # WebSocket Endpoint
 # =====================================================================
 @app.websocket("/ws/events")
-async def websocket_events_endpoint(websocket: WebSocket):
+async def websocket_events_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None),
+):
     """
     WebSocket endpoint for real-time security event streaming.
     Broadcasts live events as they occur in the video analytics pipeline.
+    Requires valid token authentication during connection handshake.
     """
+    # Authenticate client token during handshake
+    user = None
+    if is_auth_disabled():
+        user = {"username": "demo_admin", "role": "admin"}
+    elif token:
+        user = verify_token_str(token)
+
+    if not user:
+        await websocket.close(code=4401, reason="Unauthorized: Valid authentication token required.")
+        return
+
     await ws_manager.connect(websocket)
 
     # Send connection handshake acknowledgment

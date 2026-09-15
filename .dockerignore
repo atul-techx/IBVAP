@@ -1,0 +1,48 @@
+# Git & Version Control
+.git
+.github
+.gitignore
+
+# Virtual Environments
+.venv
+venv
+ENV
+env
+
+# Python Cache & Bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database & Secrets
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+.env
+*.env
+*.pem
+*.key
+
+# Local Surveillance Snapshots & Media
+backend/snapshots/*
+!backend/snapshots/.gitkeep
+backend/test_data/
+backend/test_videos/annotated_*.mp4
+backend/test_videos/output_*.mp4
+
+# Node & Frontend Dependencies
+node_modules
+frontend/node_modules
+.npm
+.eslintcache
+
+# Logs & Temporary Files
+*.log
+*.tmp
+temp/

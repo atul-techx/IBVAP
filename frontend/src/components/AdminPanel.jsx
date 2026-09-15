@@ -588,6 +588,8 @@ export default function AdminPanel() {
                           <option value="Contractor">Contractor</option>
                           <option value="Visitor">Visitor</option>
                           <option value="Medical Officer">Medical Officer</option>
+                          <option value="Watchlist Suspect">Watchlist Suspect</option>
+                          <option value="Person of Interest">Person of Interest</option>
                         </select>
                       </div>
 

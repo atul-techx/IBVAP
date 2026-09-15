@@ -11,7 +11,9 @@ Provides:
 """
 
 import hashlib
+import hmac
 import json
+import os
 import sqlite3
 import urllib.request
 import uuid
@@ -60,6 +62,29 @@ SeverityLevel = Literal["high", "medium", "low"]
 
 # Cryptographic Genesis String for Blockchain-Style Tamper-Evident Audit Logging
 GENESIS_HASH: str = "IBVAP_GENESIS_BLOCK_000000000000000000000000000000000000000000000000"
+
+# Command Authority Master Cryptographic Seal Key (Can be overridden via environment)
+COMMAND_AUTHORITY_KEY: bytes = os.environ.get(
+    "IBVAP_AUTHORITY_SIGNING_KEY",
+    "ibvap_defense_hq_master_cryptographic_seal_key_2026_top_secret"
+).encode("utf-8")
+
+
+def sign_event_block(prev_hash: str, event_hash: str, timestamp: str, camera_id: str) -> str:
+    """
+    Generate an authoritative cryptographic digital signature (HMAC-SHA256 Command Authority Seal)
+    over the block hash and linkage metadata. Prevents offline database re-hashing tampering.
+    """
+    msg = f"{prev_hash}|{event_hash}|{timestamp}|{camera_id}".encode("utf-8")
+    return hmac.new(COMMAND_AUTHORITY_KEY, msg, hashlib.sha256).hexdigest()
+
+
+def verify_block_signature(prev_hash: str, event_hash: str, timestamp: str, camera_id: str, signature: str) -> bool:
+    """Verify cryptographic block signature against Command Authority Key."""
+    if not signature:
+        return False
+    expected_sig = sign_event_block(prev_hash, event_hash, timestamp, camera_id)
+    return hmac.compare_digest(expected_sig, signature)
 
 
 def compute_event_payload_hash(
@@ -398,6 +423,7 @@ class SecurityEvent:
     identification_confidence: Optional[float] = None # Cosine similarity score against watchlist
     source_video: Optional[str] = None       # Specific source/annotated video filename (None if live webcam session)
     session_id: Optional[str] = None         # Unique surveillance session UUID
+    block_signature: Optional[str] = None    # HMAC-SHA256 Command Authority Digital Signature Seal
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -456,7 +482,8 @@ def init_db(db_path: Optional[Path] = None) -> Path:
                 identified_as TEXT,
                 identification_confidence REAL,
                 source_video TEXT,
-                session_id TEXT
+                session_id TEXT,
+                block_signature TEXT
             )
             """
         )
@@ -487,6 +514,8 @@ def init_db(db_path: Optional[Path] = None) -> Path:
             cursor.execute("ALTER TABLE events ADD COLUMN source_video TEXT")
         if "session_id" not in existing_cols:
             cursor.execute("ALTER TABLE events ADD COLUMN session_id TEXT")
+        if "block_signature" not in existing_cols:
+            cursor.execute("ALTER TABLE events ADD COLUMN block_signature TEXT")
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events (camera_id, timestamp)"
@@ -724,10 +753,14 @@ def _notify_listeners(event_dict: dict[str, Any]):
 
     # Only if NOT running in-process with registered listeners, attempt external HTTP webhook
     try:
+        internal_key = os.environ.get("IBVAP_INTERNAL_KEY", "ibvap_internal_process_broadcast_secret_2026")
         req = urllib.request.Request(
             "http://127.0.0.1:8000/api/internal/broadcast",
             data=json.dumps(event_dict).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Internal-Key": internal_key,
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=0.15) as _:
@@ -825,6 +858,7 @@ def log_event(
         plate_number=plate_number,
         identified_as=identified_as,
     )
+    block_signature = sign_event_block(prev_hash, event_hash, timestamp, camera_id)
 
     event = SecurityEvent(
         event_id=event_id,
@@ -850,6 +884,7 @@ def log_event(
         identification_confidence=round(float(identification_confidence), 3) if identification_confidence is not None else None,
         source_video=source_video,
         session_id=session_id,
+        block_signature=block_signature,
     )
 
     with sqlite3.connect(target_db, timeout=10.0) as conn:
@@ -860,8 +895,8 @@ def log_event(
                 event_id, camera_id, event_type, object_class, track_id,
                 timestamp, frame_number, bbox, confidence, severity, snapshot_path, tactical_summary,
                 prev_hash, event_hash, face_detected, face_bbox, plate_number, plate_confidence, plate_bbox,
-                identified_as, identification_confidence, source_video, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                identified_as, identification_confidence, source_video, session_id, block_signature
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.event_id,
@@ -887,6 +922,7 @@ def log_event(
                 event.identification_confidence,
                 event.source_video,
                 event.session_id,
+                event.block_signature,
             ),
         )
         conn.commit()
@@ -1127,6 +1163,20 @@ def verify_chain_integrity(db_path: Optional[Path] = None) -> dict[str, Any]:
                     "plate_number": plate_num,
                     "identified_as": identified,
                 },
+                "verified_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Verify Command Authority Digital Signature (if present on block)
+        stored_sig = r["block_signature"] if "block_signature" in r.keys() and r["block_signature"] else ""
+        if stored_sig and not verify_block_signature(stored_prev, stored_hash, r["timestamp"], r["camera_id"], stored_sig):
+            return {
+                "valid": False,
+                "total_events_checked": idx,
+                "first_tampered_event_id": r["event_id"],
+                "tampered_at_position": idx + 1,
+                "reason": "Cryptographic signature mismatch: block forged or modified without Command Authority Key",
+                "expected_hash": recomputed_hash,
+                "stored_hash": stored_hash,
                 "verified_at": datetime.now(timezone.utc).isoformat(),
             }
 
