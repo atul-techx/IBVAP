@@ -1534,9 +1534,9 @@ async def process_client_frame(
         raise HTTPException(status_code=400, detail=f"Invalid frame data: {str(e)}")
 
     height, width = frame.shape[:2]
-    # Active perimeter surveillance zone for webcam mode covering central surveillance field:
-    # [[0.10, 0.08], [0.90, 0.08], [0.90, 0.92], [0.10, 0.92]]
-    webcam_poly = np.array([[0.10, 0.08], [0.90, 0.08], [0.90, 0.92], [0.10, 0.92]], dtype=np.float32)
+    # Dedicated side perimeter corridor for webcam mode so sitting at desk does not trigger false alerts
+    # Corridor covers right 35% of the frame: [[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]]
+    webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
     polygon = (webcam_poly * [width, height]).astype(np.int32)
 
     model = get_client_yolo_model()
@@ -1577,8 +1577,6 @@ async def process_client_frame(
                         poly_foot = cv2.pointPolygonTest(polygon, (float(foot_point[0]), float(foot_point[1])), False)
                         poly_center = cv2.pointPolygonTest(polygon, (float(center_point[0]), float(center_point[1])), False)
                         is_inside = (poly_foot >= 0 or poly_center >= 0)
-                    else:
-                        is_inside = True
 
                     if is_inside:
                         has_intrusion = True
@@ -1648,7 +1646,6 @@ async def process_client_frame(
         for d in detections
     )
     has_unknown_activity = has_unknown_person or has_unknown_vehicle
-    has_intrusion = has_intrusion or has_unknown_activity
 
     # Enqueue intrusion event with rate limiting (at most once every 3.5 seconds)
     now = time.time()

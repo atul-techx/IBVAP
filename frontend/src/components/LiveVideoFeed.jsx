@@ -123,13 +123,13 @@ export default function LiveVideoFeed({
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Draw Virtual Fence Polygon across central surveillance field
+    // 1. Draw Virtual Fence Polygon on the right side perimeter corridor
     if (zoneActive) {
       const poly = [
-        [0.10 * w, 0.08 * h],
-        [0.90 * w, 0.08 * h],
-        [0.90 * w, 0.92 * h],
-        [0.10 * w, 0.92 * h],
+        [0.62 * w, 0.12 * h],
+        [0.96 * w, 0.12 * h],
+        [0.96 * w, 0.88 * h],
+        [0.62 * w, 0.88 * h],
       ];
 
       ctx.save();
@@ -163,9 +163,9 @@ export default function LiveVideoFeed({
       ctx.font = 'bold 12px monospace';
       ctx.fillStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
       ctx.fillText(
-        hasIntrusion ? '⚠ ALERT: ACTIVE PERIMETER DETECTION' : '🛡 ZONE: POLYGON α (PERIMETER ACTIVE)',
-        0.10 * w + 8,
-        0.08 * h - 8
+        hasIntrusion ? '⚠ ALERT: INTRUSION ACTIVE' : '🛡 ZONE: POLYGON α (PERIMETER ACTIVE)',
+        0.62 * w + 8,
+        0.12 * h - 8
       );
       ctx.restore();
     }
@@ -342,8 +342,7 @@ export default function LiveVideoFeed({
           setClientUnknownPersonCount(unknownPersons.length);
           setClientUnknownVehicleCount(unknownVehicles.length);
 
-          const hasUnknownActivity = unknownPersons.length > 0 || unknownVehicles.length > 0;
-          const hasIntrusion = res.has_intrusion || hasUnknownActivity;
+          const hasIntrusion = Boolean(res.has_intrusion);
           setClientHasIntrusion(hasIntrusion);
 
           if (res.telemetry) {
@@ -361,25 +360,22 @@ export default function LiveVideoFeed({
               object_class: 'person',
               severity: 'high',
               camera_id: cameraId,
-              tactical_summary: 'Unknown person in area',
             });
           } else if (unknownVehicles.length > 0 && (now - lastWebcamAlertTimeRef.current >= 4500)) {
             lastWebcamAlertTimeRef.current = now;
             voiceAlertService.announceEvent({
               event_type: 'unauthorized_vehicle',
-              object_class: 'vehicle',
+              object_class: 'car',
               severity: 'high',
               camera_id: cameraId,
-              tactical_summary: 'Unknown vehicle in area',
             });
-          } else if (res.has_intrusion && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+          } else if (hasIntrusion && (now - lastWebcamAlertTimeRef.current >= 4500)) {
             lastWebcamAlertTimeRef.current = now;
             voiceAlertService.announceEvent({
               event_type: 'zone_entry',
               object_class: 'person',
               severity: 'high',
               camera_id: cameraId,
-              tactical_summary: 'Unknown person in area',
             });
           }
         }
