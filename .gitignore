@@ -44,6 +44,7 @@ backend/test_data/
 backend/watchlist/
 backend/test_videos/annotated_*.mp4
 backend/test_videos/output_*.mp4
+backend/test_videos/upload_*.mp4
 backend/test_*.mp4
 
 # YOLO / Large Weights (Ultralytics auto-downloads yolov8n.pt if absent)

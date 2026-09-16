@@ -282,7 +282,13 @@ async def get_current_user_flexible(
     if credentials and credentials.credentials:
         raw_token = credentials.credentials
     elif token:
-        raw_token = token
+        # Strip any appended query parameters if client concatenated '?v=...' to the token
+        clean_token = token
+        if "?" in clean_token:
+            clean_token = clean_token.split("?")[0]
+        if "&" in clean_token:
+            clean_token = clean_token.split("&")[0]
+        raw_token = clean_token.strip()
 
     if not raw_token:
         raise HTTPException(

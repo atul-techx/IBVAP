@@ -19,6 +19,9 @@ import {
   FileText,
   Copy,
   X,
+  Download,
+  Printer,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { fetchEvents, getSnapshotUrl, fetchAuditVerification, fetchAuditCertificate } from '../services/api';
 
@@ -85,6 +88,63 @@ export default function EventHistory({ onSelectEvent }) {
     setTimeout(() => setCopiedCert(false), 2000);
   };
 
+  // Cryptographic forensic report modal state (Item 24)
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  const handleExportCSV = () => {
+    if (!filteredEvents || filteredEvents.length === 0) {
+      alert('No events found matching the current filters to export.');
+      return;
+    }
+
+    const headers = [
+      'Event ID',
+      'Timestamp (UTC)',
+      'Camera ID',
+      'Object Class',
+      'Track ID',
+      'Severity',
+      'Event Type',
+      'Zone Breached',
+      'Identity / Auth Status',
+      'License Plate',
+      'Tamper Hash (SHA-256)',
+      'Previous Block Hash'
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = filteredEvents.map((ev) => [
+      escapeCsv(ev.event_id),
+      escapeCsv(ev.timestamp),
+      escapeCsv(ev.camera_id),
+      escapeCsv(ev.object_class),
+      escapeCsv(ev.track_id),
+      escapeCsv(ev.severity),
+      escapeCsv(ev.event_type),
+      escapeCsv(ev.zone_breached ? 'YES' : 'NO'),
+      escapeCsv(ev.identified_as || 'UNKNOWN'),
+      escapeCsv(ev.plate_number || 'N/A'),
+      escapeCsv(ev.event_hash || ''),
+      escapeCsv(ev.prev_hash || '')
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `IBVAP_Border_Events_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(url);
+    document.body.removeChild(link);
+  };
+
   useEffect(() => {
     loadHistory();
   }, [severityFilter, typeFilter, classFilter]);
@@ -134,6 +194,52 @@ export default function EventHistory({ onSelectEvent }) {
           >
             <ShieldCheck size={15} className={verifyingAudit ? 'pulse-dot' : ''} />
             <span>{verifyingAudit ? 'Verifying Chain...' : 'Verify Audit Trail'}</span>
+          </button>
+
+          {/* Export CSV Button (Item 24) */}
+          <button
+            onClick={handleExportCSV}
+            style={{
+              background: 'rgba(16, 185, 129, 0.12)',
+              border: '1px solid rgba(16, 185, 129, 0.45)',
+              color: '#34d399',
+              padding: '0.4rem 0.85rem',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              transition: 'all 0.2s ease',
+            }}
+            title="Export filtered perimeter security events to standard RFC-4180 CSV spreadsheet"
+          >
+            <FileSpreadsheet size={14} />
+            <span>Export CSV</span>
+          </button>
+
+          {/* Export PDF / Forensic Report Button (Item 24) */}
+          <button
+            onClick={() => setShowReportModal(true)}
+            style={{
+              background: 'rgba(99, 102, 241, 0.14)',
+              border: '1px solid rgba(99, 102, 241, 0.45)',
+              color: '#818cf8',
+              padding: '0.4rem 0.85rem',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              transition: 'all 0.2s ease',
+            }}
+            title="Generate and print official IBVAP Military Border Incident Report Dossier (PDF)"
+          >
+            <Printer size={14} />
+            <span>Forensic Report (PDF)</span>
           </button>
 
           <button
@@ -569,6 +675,268 @@ export default function EventHistory({ onSelectEvent }) {
                   {copiedCert ? <Check size={15} /> : <Copy size={15} />}
                   <span>{copiedCert ? 'Copied Certificate JSON!' : 'Copy Certificate (JSON)'}</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Forensic Printable Report Modal (Item 24) */}
+      {showReportModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(5, 10, 20, 0.88)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1.5rem',
+          }}
+          onClick={() => setShowReportModal(false)}
+        >
+          <div
+            id="ibvap-printable-report"
+            style={{
+              background: '#090d16',
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              borderRadius: 'var(--radius-lg)',
+              maxWidth: '960px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6)',
+              overflow: 'hidden',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '1.25rem 1.75rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(99, 102, 241, 0.06)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '8px',
+                    background: 'rgba(99, 102, 241, 0.18)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    color: '#818cf8',
+                  }}
+                >
+                  <FileText size={20} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', letterSpacing: '0.04em' }}>
+                    IBVAP BORDER SURVEILLANCE & AUDIT DOSSIER
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '2px' }}>
+                    Official Incident Log & Tamper-Evident SHA-256 Audit Trail
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <button
+                  onClick={() => window.print()}
+                  style={{
+                    background: '#6366f1',
+                    border: 'none',
+                    color: '#fff',
+                    padding: '0.45rem 1rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                  }}
+                >
+                  <Printer size={15} />
+                  <span>Print to PDF / Paper</span>
+                </button>
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: '0.4rem',
+                    borderRadius: 'var(--radius-sm)',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Printable Content */}
+            <div
+              style={{
+                padding: '1.75rem',
+                overflowY: 'auto',
+                color: '#cbd5e1',
+                fontSize: '0.85rem',
+              }}
+            >
+              {/* Dossier Meta Header */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: '1rem',
+                  padding: '1rem',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  borderRadius: 'var(--radius-md)',
+                  marginBottom: '1.5rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>GENERATED ON</div>
+                  <div style={{ fontWeight: 700, color: '#f1f5f9', marginTop: '3px' }}>
+                    {new Date().toUTCString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>RECORD COUNT</div>
+                  <div style={{ fontWeight: 700, color: '#f1f5f9', marginTop: '3px' }}>
+                    {filteredEvents.length} Events Listed
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>HIGH/CRITICAL INCIDENTS</div>
+                  <div style={{ fontWeight: 700, color: '#f87171', marginTop: '3px' }}>
+                    {filteredEvents.filter((e) => ['high', 'critical'].includes(e.severity?.toLowerCase())).length}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>CLASSIFICATION</div>
+                  <div style={{ fontWeight: 700, color: '#38bdf8', marginTop: '3px' }}>
+                    RESTRICTED // LAW ENFORCEMENT
+                  </div>
+                </div>
+              </div>
+
+              {/* Forensic Events Table */}
+              <div style={{ overflowX: 'auto' }}>
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '0.8rem',
+                    textAlign: 'left',
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+                        color: '#94a3b8',
+                      }}
+                    >
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Timestamp</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Cam ID</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Target</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Event Type</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Severity</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Identity / Plate</th>
+                      <th style={{ padding: '0.6rem 0.5rem' }}>Tamper SHA-256</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEvents.map((ev, idx) => (
+                      <tr
+                        key={ev.event_id || idx}
+                        style={{
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                          background: idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)',
+                        }}
+                      >
+                        <td style={{ padding: '0.6rem 0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.74rem' }}>
+                          {ev.timestamp ? ev.timestamp.replace('T', ' ').slice(0, 19) : '—'}
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#38bdf8' }}>
+                          {ev.camera_id || 'CAM_01'}
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem' }}>
+                          <span style={{ textTransform: 'capitalize' }}>{ev.object_class || 'Target'}</span>
+                          {ev.track_id !== undefined && (
+                            <span style={{ color: '#64748b', fontSize: '0.72rem', marginLeft: '4px' }}>#{ev.track_id}</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem', color: ev.zone_breached ? '#f87171' : '#e2e8f0' }}>
+                          {ev.event_type || 'detection'}
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem' }}>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              textTransform: 'uppercase',
+                              background:
+                                ev.severity === 'critical'
+                                  ? 'rgba(239, 68, 68, 0.2)'
+                                  : ev.severity === 'high'
+                                  ? 'rgba(249, 115, 22, 0.2)'
+                                  : 'rgba(16, 185, 129, 0.15)',
+                              color:
+                                ev.severity === 'critical'
+                                  ? '#ef4444'
+                                  : ev.severity === 'high'
+                                  ? '#f97316'
+                                  : '#10b981',
+                            }}
+                          >
+                            {ev.severity || 'low'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem' }}>
+                          {ev.identified_as || ev.plate_number || (ev.zone_breached ? 'Unknown Infiltrator' : 'Unidentified')}
+                        </td>
+                        <td style={{ padding: '0.6rem 0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#64748b' }}>
+                          {ev.event_hash ? `${ev.event_hash.slice(0, 12)}...` : 'Unsigned'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Dossier Footer */}
+              <div
+                style={{
+                  marginTop: '2rem',
+                  paddingTop: '1rem',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: '0.74rem',
+                  color: '#64748b',
+                }}
+              >
+                <div>IBVAP Autonomous Perimeter Defense System &bull; Certified Cryptographic Ledger</div>
+                <div>CONFIDENTIAL &bull; FOR INTERNAL DEFENCE & AUDIT COMPLIANCE ONLY</div>
               </div>
             </div>
           </div>

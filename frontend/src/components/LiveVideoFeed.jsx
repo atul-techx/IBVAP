@@ -22,15 +22,22 @@ import {
   VideoOff,
   CameraOff,
   Plus,
+  LayoutGrid,
+  Upload,
+  Edit3,
+  RotateCcw,
+  Check,
 } from 'lucide-react';
 import {
   getLiveFeedUrl,
+  getLiveFrameUrl,
   fetchSystemHealth,
   startStream,
   stopStream,
   fetchStreamStatus,
   fetchAvailableVideos,
   processClientFrame,
+  uploadVideoFile,
 } from '../services/api';
 import voiceAlertService from '../services/voiceAlertService';
 import CctvConnectModal from './CctvConnectModal';
@@ -66,6 +73,21 @@ export default function LiveVideoFeed({
   const [clientUnknownVehicleCount, setClientUnknownVehicleCount] = useState(0);
   const [clientTelemetry, setClientTelemetry] = useState({ fps: 0, occupancy: 0 });
 
+  // Multi-Camera Grid vs Single View Mode (Item 10)
+  const [viewLayout, setViewLayout] = useState('single'); // 'single' | 'grid'
+
+  // Interactive Virtual Fence Canvas Drawing Mode (Item 11)
+  const [customFencePoints, setCustomFencePoints] = useState([]);
+  const [isDrawingFence, setIsDrawingFence] = useState(false);
+  const customFencePointsRef = useRef(customFencePoints);
+  customFencePointsRef.current = customFencePoints;
+  const isDrawingFenceRef = useRef(isDrawingFence);
+  isDrawingFenceRef.current = isDrawingFence;
+
+  // Offline Video File Upload (Item 26)
+  const fileInputRef = useRef(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+
   const videoContainerRef = useRef(null);
   const fallbackIntervalRef = useRef(null);
   const webcamVideoRef = useRef(null);
@@ -79,7 +101,7 @@ export default function LiveVideoFeed({
 
   const isPhysicalCamera = cameraId === 'CAM_01' || cameraId === 'CAM_02';
 
-  const feedUrl = `${getLiveFeedUrl(cameraId)}?v=${streamKey}`;
+  const feedUrl = getLiveFeedUrl(cameraId, { v: streamKey });
 
   const validCameras = (cameras || []).filter(
     (c) => c?.camera_id && !c.camera_id.toUpperCase().startsWith('SYSTEM') && !c.camera_id.toUpperCase().startsWith('AUTH')
@@ -123,14 +145,18 @@ export default function LiveVideoFeed({
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Draw Virtual Fence Polygon on the right side perimeter corridor
+    // 1. Draw Virtual Fence Polygon (Custom drawn polygon or default side perimeter corridor)
     if (zoneActive) {
-      const poly = [
-        [0.62 * w, 0.12 * h],
-        [0.96 * w, 0.12 * h],
-        [0.96 * w, 0.88 * h],
-        [0.62 * w, 0.88 * h],
-      ];
+      const customPts = customFencePointsRef.current;
+      const isCustom = customPts && customPts.length >= 3;
+      const poly = isCustom
+        ? customPts.map(([nx, ny]) => [nx * w, ny * h])
+        : [
+            [0.62 * w, 0.12 * h],
+            [0.96 * w, 0.12 * h],
+            [0.96 * w, 0.88 * h],
+            [0.62 * w, 0.88 * h],
+          ];
 
       ctx.save();
       ctx.beginPath();
@@ -146,7 +172,7 @@ export default function LiveVideoFeed({
 
       // Glowing cyber perimeter border
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
+      ctx.strokeStyle = hasIntrusion ? '#ef4444' : (isCustom ? '#38bdf8' : '#38bdf8');
       ctx.shadowColor = hasIntrusion ? '#ef4444' : '#38bdf8';
       ctx.shadowBlur = hasIntrusion ? 16 : 8;
       ctx.stroke();
@@ -162,11 +188,57 @@ export default function LiveVideoFeed({
       // Zone Label Badge
       ctx.font = 'bold 12px monospace';
       ctx.fillStyle = hasIntrusion ? '#ef4444' : '#38bdf8';
+      const labelX = poly[0][0] + 8;
+      const labelY = Math.max(16, poly[0][1] - 8);
       ctx.fillText(
-        hasIntrusion ? '⚠ ALERT: INTRUSION ACTIVE' : '🛡 ZONE: POLYGON α (PERIMETER ACTIVE)',
-        0.62 * w + 8,
-        0.12 * h - 8
+        hasIntrusion
+          ? '⚠ ALERT: INTRUSION ACTIVE'
+          : isCustom
+          ? '🛡 ZONE: CUSTOM POLYGON (ACTIVE)'
+          : '🛡 ZONE: POLYGON α (PERIMETER ACTIVE)',
+        labelX,
+        labelY
       );
+      ctx.restore();
+    }
+
+    // In-progress fence vertices & dashed preview if currently in drawing mode
+    if (isDrawingFenceRef.current) {
+      const pts = customFencePointsRef.current || [];
+      ctx.save();
+      if (pts.length > 0) {
+        ctx.beginPath();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2;
+        ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i][0] * w, pts[i][1] * h);
+        }
+        ctx.stroke();
+
+        pts.forEach(([nx, ny], idx) => {
+          ctx.beginPath();
+          ctx.arc(nx * w, ny * h, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = '#f59e0b';
+          ctx.fill();
+          ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = '#000000';
+          ctx.fillText(String(idx + 1), nx * w - 3, ny * h + 3);
+        });
+      }
+
+      // Drawing HUD instruction banner
+      ctx.font = 'bold 12px monospace';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillRect(w / 2 - 180, 10, 360, 26);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(w / 2 - 180, 10, 360, 26);
+      ctx.fillStyle = '#f59e0b';
+      ctx.textAlign = 'center';
+      ctx.fillText(`✏️ CLICK CANVAS TO PLACE VERTEX (${pts.length} PTS) • CLICK APPLY`, w / 2, 27);
+      ctx.textAlign = 'start';
       ctx.restore();
     }
 
@@ -181,7 +253,7 @@ export default function LiveVideoFeed({
 
       const isPerson = det.class_name?.toLowerCase() === 'person';
       const isVehicle = ['car', 'bus', 'truck', 'motorcycle', 'vehicle'].includes(det.class_name?.toLowerCase());
-      const isAuthPerson = isPerson && det.identified_as && det.identified_as !== 'UNKNOWN';
+      const isAuthPerson = isPerson && (det.is_authorized_person || det.is_authorized || (det.identified_as && det.identified_as !== 'UNKNOWN'));
       const isUnknownPerson = isPerson && !isAuthPerson;
       const isAuthVeh = isVehicle && det.is_authorized_vehicle;
       const isUnauthVeh = isVehicle && !det.is_authorized_vehicle;
@@ -325,6 +397,9 @@ export default function LiveVideoFeed({
           image: dataUrl,
           camera_id: cameraId,
           show_zone: showZoneRef.current,
+          custom_polygon: (customFencePointsRef.current && customFencePointsRef.current.length >= 3)
+            ? customFencePointsRef.current
+            : undefined,
         });
 
         if (res?.status === 'success') {
@@ -332,11 +407,11 @@ export default function LiveVideoFeed({
           setClientDetections(detections);
 
           const unknownPersons = detections.filter(
-            (d) => d.class_name?.toLowerCase() === 'person' && (!d.identified_as || d.identified_as === 'UNKNOWN')
+            (d) => d.class_name?.toLowerCase() === 'person' && !d.is_authorized_person && !d.is_authorized && (!d.identified_as || d.identified_as === 'UNKNOWN')
           );
           const isVehicleClass = (cls) => ['car', 'truck', 'bus', 'motorcycle', 'vehicle'].includes(cls?.toLowerCase());
           const unknownVehicles = detections.filter(
-            (d) => isVehicleClass(d.class_name) && !d.is_authorized_vehicle
+            (d) => isVehicleClass(d.class_name) && !d.is_authorized_vehicle && !d.is_authorized
           );
 
           setClientUnknownPersonCount(unknownPersons.length);
@@ -351,9 +426,13 @@ export default function LiveVideoFeed({
 
           drawClientOverlay(canvas, vw, vh, detections, hasIntrusion, showZoneRef.current);
 
-          // Real-time Voice Alert Trigger with 4.5s throttle to avoid speech congestion
+          // Real-time Voice Alert Trigger with 6.0s throttle to avoid speech congestion
+          // Only alert for unknown persons that are entering the zone or when no zone is active
           const now = Date.now();
-          if (unknownPersons.length > 0 && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+          const alertableUnknownPersons = unknownPersons.filter(
+            (p) => !p.is_authorized_person && !p.is_authorized && (p.in_zone || !showZoneRef.current)
+          );
+          if (alertableUnknownPersons.length > 0 && (now - lastWebcamAlertTimeRef.current >= 6000)) {
             lastWebcamAlertTimeRef.current = now;
             voiceAlertService.announceEvent({
               event_type: 'unauthorized_person',
@@ -361,7 +440,7 @@ export default function LiveVideoFeed({
               severity: 'high',
               camera_id: cameraId,
             });
-          } else if (unknownVehicles.length > 0 && (now - lastWebcamAlertTimeRef.current >= 4500)) {
+          } else if (unknownVehicles.length > 0 && (now - lastWebcamAlertTimeRef.current >= 6000)) {
             lastWebcamAlertTimeRef.current = now;
             voiceAlertService.announceEvent({
               event_type: 'unauthorized_vehicle',
@@ -480,10 +559,10 @@ export default function LiveVideoFeed({
   useEffect(() => {
     if (streamMode === 'fallback_frame' && !manuallyStopped) {
       const updateFrame = () => {
-        setFallbackFrameUrl(`${getLiveFeedUrl(cameraId)}/frame?t=${Date.now()}`);
+        setFallbackFrameUrl(getLiveFrameUrl(cameraId, { t: Date.now() }));
       };
       updateFrame();
-      fallbackIntervalRef.current = setInterval(updateFrame, 200); // 5 FPS fallback
+      fallbackIntervalRef.current = setInterval(updateFrame, 250); // 4 FPS fallback
       return () => {
         if (fallbackIntervalRef.current) clearInterval(fallbackIntervalRef.current);
       };
@@ -494,10 +573,9 @@ export default function LiveVideoFeed({
 
   // 1-Click Launch or Switch Surveillance Video Feed (Continuous Loop)
   const handleStartVideoFeed = async (videoFilename = selectedVideo) => {
-    if (webcamIntervalRef.current) {
-      clearInterval(webcamIntervalRef.current);
-      webcamIntervalRef.current = null;
-    }
+    // 1. Cleanly stop client webcam hardware tracks and timers
+    stopBrowserWebcamTracks();
+
     setActiveSourceType('test_video');
     setManuallyStopped(false);
     setIsControllingStream(true);
@@ -515,10 +593,12 @@ export default function LiveVideoFeed({
         ...prev,
         [cameraId]: { running: true, pid: res?.pid || null },
       }));
-      // Short delay for pipeline initialization then refresh stream key
+      // Short delay for backend pipeline to spin up and produce first frame before loading stream
       setTimeout(() => {
         setStreamKey(Date.now());
-      }, 1000);
+        setHasError(false);
+        setIsLoaded(true);
+      }, 1200);
     } catch (err) {
       alert(`Failed to start video feed: ${err.message}`);
     } finally {
@@ -528,33 +608,39 @@ export default function LiveVideoFeed({
 
   // Launch Real Browser Device Webcam with Live AI Border Surveillance Analytics
   const handleStartWebcam = async () => {
-    if (webcamStreamRef.current && webcamStreamRef.current.active) {
-      setActiveSourceType('browser_webcam');
-      setStreamMode('browser_webcam');
-      setManuallyStopped(false);
-      setIsControllingStream(false);
-      setHasError(false);
-      setWebcamError(null);
-      setIsLoaded(true);
-      if (webcamVideoRef.current && webcamVideoRef.current.srcObject !== webcamStreamRef.current) {
-        webcamVideoRef.current.srcObject = webcamStreamRef.current;
-        webcamVideoRef.current.play().catch(() => {});
-      }
-      startClientAiLoop();
-      return;
-    }
-
-    stopBrowserWebcamTracks();
+    // 1. Terminate backend stream subprocess for this camera if running
     stopStream(cameraId).catch(() => {});
+    setStreamProcesses((prev) => ({
+      ...prev,
+      [cameraId]: { running: false, pid: null },
+    }));
 
+    // 2. Set webcam mode states and clear errors
     setActiveSourceType('browser_webcam');
     setStreamMode('browser_webcam');
     setManuallyStopped(false);
-    setIsControllingStream(true);
     setHasError(false);
     setWebcamError(null);
-    setIsLoaded(false);
+    setIsLoaded(true);
 
+    // 3. If hardware webcam track is already active, re-bind to video element
+    if (webcamStreamRef.current && webcamStreamRef.current.active) {
+      setIsControllingStream(false);
+      setTimeout(() => {
+        if (webcamVideoRef.current) {
+          if (webcamVideoRef.current.srcObject !== webcamStreamRef.current) {
+            webcamVideoRef.current.srcObject = webcamStreamRef.current;
+          }
+          webcamVideoRef.current.play().catch(() => {});
+        }
+        startClientAiLoop();
+      }, 60);
+      return;
+    }
+
+    // 4. Request new hardware webcam stream
+    stopBrowserWebcamTracks();
+    setIsControllingStream(true);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Browser mediaDevices API is not supported in this browser or environment.');
@@ -571,14 +657,14 @@ export default function LiveVideoFeed({
       });
 
       webcamStreamRef.current = stream;
-      if (webcamVideoRef.current) {
-        webcamVideoRef.current.srcObject = stream;
-        await webcamVideoRef.current.play().catch(() => {});
-      }
-
+      setTimeout(() => {
+        if (webcamVideoRef.current) {
+          webcamVideoRef.current.srcObject = stream;
+          webcamVideoRef.current.play().catch(() => {});
+        }
+        startClientAiLoop();
+      }, 60);
       setIsLoaded(true);
-      setIsControllingStream(false);
-      startClientAiLoop();
     } catch (err) {
       console.error('[Webcam] Access error:', err);
       const errMsg =
@@ -589,6 +675,7 @@ export default function LiveVideoFeed({
           : `Failed to open camera: ${err.message}`;
       setWebcamError(errMsg);
       setIsLoaded(true);
+    } finally {
       setIsControllingStream(false);
     }
   };
@@ -692,6 +779,53 @@ export default function LiveVideoFeed({
     }
   };
 
+  // Interactive Virtual Fence Canvas Click Handler (Item 11)
+  const handleCanvasClick = (e) => {
+    if (!isDrawingFence) return;
+    const canvas = webcamCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    let nx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    if (isWebcamMirror) {
+      nx = 1.0 - nx;
+    }
+    const newPt = [Number(nx.toFixed(3)), Number(ny.toFixed(3))];
+    setCustomFencePoints((prev) => [...prev, newPt]);
+  };
+
+  const handleResetCustomZone = () => {
+    setCustomFencePoints([]);
+    setIsDrawingFence(false);
+  };
+
+  // Offline Video File Upload Trigger (Item 26)
+  const handleUploadVideoClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleVideoFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingVideo(true);
+    try {
+      const res = await uploadVideoFile(file);
+      setAvailableVideos((prev) => [
+        { filename: res.filename, label: res.label, size_kb: res.size_kb },
+        ...prev,
+      ]);
+      setSelectedVideo(res.filename);
+      await handleStartVideoFeed(res.filename);
+    } catch (err) {
+      alert(`Video upload failed: ${err.message}`);
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
   const hasIntrusion = camTelemetry.occupancy > 0;
 
   return (
@@ -770,6 +904,54 @@ export default function LiveVideoFeed({
             </button>
           );
         })}
+
+        {/* View Mode Switcher (Item 10) */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <button
+            type="button"
+            onClick={() => setViewLayout('single')}
+            style={{
+              background: viewLayout === 'single' ? '#0284c7' : '#ffffff',
+              color: viewLayout === 'single' ? '#ffffff' : '#64748b',
+              border: `1px solid ${viewLayout === 'single' ? '#0284c7' : '#cbd5e1'}`,
+              padding: '0.3rem 0.65rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.76rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              transition: 'all 0.15s ease',
+            }}
+            title="Switch to single focused camera view"
+          >
+            <Video size={13} />
+            <span>Single View</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewLayout('grid')}
+            style={{
+              background: viewLayout === 'grid' ? '#0284c7' : '#ffffff',
+              color: viewLayout === 'grid' ? '#ffffff' : '#64748b',
+              border: `1px solid ${viewLayout === 'grid' ? '#0284c7' : '#cbd5e1'}`,
+              padding: '0.3rem 0.65rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.76rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              transition: 'all 0.15s ease',
+            }}
+            title="Switch to 4-camera split tactical grid (CAM_01 to CAM_04)"
+          >
+            <LayoutGrid size={13} />
+            <span>4-Cam Grid</span>
+          </button>
+        </div>
       </div>
 
       {/* Feed Panel Header */}
@@ -855,6 +1037,15 @@ export default function LiveVideoFeed({
             </select>
           </div>
 
+          {/* Hidden video file input for offline video upload (Item 26) */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleVideoFileChange}
+            accept="video/mp4,video/avi,video/x-matroska,video/quicktime,video/webm"
+            style={{ display: 'none' }}
+          />
+
           {/* Play/Restart CCTV Loop Button */}
           <button
             className="icon-btn"
@@ -877,6 +1068,30 @@ export default function LiveVideoFeed({
           >
             {isControllingStream ? <Loader2 size={13} className="spin-icon" /> : <Play size={13} fill="currentColor" />}
             <span>Play Feed</span>
+          </button>
+
+          {/* Upload Offline Video Button (Item 26) */}
+          <button
+            className="icon-btn"
+            onClick={handleUploadVideoClick}
+            disabled={uploadingVideo || isControllingStream}
+            title="Upload local surveillance or test video file (MP4/AVI/MKV/MOV) for offline AI inspection"
+            style={{
+              background: 'rgba(168, 85, 247, 0.2)',
+              border: '1px solid #a855f7',
+              color: '#c084fc',
+              padding: '0.35rem 0.65rem',
+              borderRadius: 'var(--radius-sm)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              cursor: 'pointer',
+            }}
+          >
+            {uploadingVideo ? <Loader2 size={13} className="spin-icon" /> : <Upload size={13} />}
+            <span>{uploadingVideo ? 'Uploading...' : 'Upload Video'}</span>
           </button>
 
           {/* Webcam Button */}
@@ -954,6 +1169,57 @@ export default function LiveVideoFeed({
             <span>{showZone ? 'Zone: ON' : 'Zone: OFF'}</span>
           </button>
 
+          {/* Custom Fence Drawing Mode Toggle (Item 11) */}
+          {streamMode === 'browser_webcam' && (
+            <>
+              <button
+                className="icon-btn"
+                onClick={() => setIsDrawingFence((prev) => !prev)}
+                title={isDrawingFence ? "Drawing mode active: Click canvas to add vertices, click 'Done' when finished." : "Draw custom virtual fence polygon on video canvas"}
+                style={{
+                  background: isDrawingFence ? 'rgba(245, 158, 11, 0.3)' : 'rgba(245, 158, 11, 0.15)',
+                  border: `1px solid ${isDrawingFence ? '#f59e0b' : '#d97706'}`,
+                  color: isDrawingFence ? '#fbbf24' : '#f59e0b',
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontWeight: 700,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <Edit3 size={13} />
+                <span>{isDrawingFence ? `Done (${customFencePoints.length} pts)` : 'Draw Fence'}</span>
+              </button>
+
+              {customFencePoints.length > 0 && (
+                <button
+                  className="icon-btn"
+                  onClick={handleResetCustomZone}
+                  title="Reset custom fence back to default perimeter side corridor"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid #ef4444',
+                    color: '#f87171',
+                    padding: '0.35rem 0.55rem',
+                    borderRadius: 'var(--radius-sm)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <RotateCcw size={12} />
+                  <span>Reset Zone</span>
+                </button>
+              )}
+            </>
+          )}
+
           {/* Stop Stream Button */}
           {!manuallyStopped && (
             <button
@@ -999,11 +1265,184 @@ export default function LiveVideoFeed({
         </div>
       </div>
 
-      {/* Main Video Viewport */}
-      <div
-        ref={videoContainerRef}
-        className={`live-viewport-container video-viewport ${isFullscreen ? 'fullscreen-mode' : ''}`}
-      >
+      {/* Main Video Viewport or 4-Cam Grid (Item 10) */}
+      {viewLayout === 'grid' ? (
+        <div
+          className="tactical-grid-viewport"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gap: '0.85rem',
+            padding: '0.85rem',
+            background: '#020617',
+            minHeight: '520px',
+          }}
+        >
+          {['CAM_01', 'CAM_02', 'CAM_03', 'CAM_04'].map((gridCamId) => {
+            const camMeta = validCameras.find((c) => c.camera_id === gridCamId) || {
+              camera_id: gridCamId,
+              name: gridCamId === 'CAM_01' ? 'Sector 01 Gate' : gridCamId === 'CAM_02' ? 'Sector 02 Perimeter' : gridCamId === 'CAM_03' ? 'Border Outpost 01' : 'Sector 04 Perimeter',
+              location: 'Border Security Zone',
+            };
+            const isTargetSelected = gridCamId === cameraId;
+            const hasLocalIntrusion = isTargetSelected && (clientHasIntrusion || camTelemetry.occupancy > 0);
+
+            return (
+              <div
+                key={gridCamId}
+                style={{
+                  position: 'relative',
+                  borderRadius: 'var(--radius-md)',
+                  border: hasLocalIntrusion
+                    ? '2px solid #ef4444'
+                    : isTargetSelected
+                    ? '2px solid #0284c7'
+                    : '1px solid rgba(255, 255, 255, 0.12)',
+                  overflow: 'hidden',
+                  background: '#090d16',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: hasLocalIntrusion
+                    ? '0 0 15px rgba(239, 68, 68, 0.35)'
+                    : isTargetSelected
+                    ? '0 0 12px rgba(2, 132, 199, 0.3)'
+                    : 'none',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                {/* Tactical Tile Header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.45rem 0.75rem',
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                    zIndex: 2,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.78rem', fontWeight: 700, color: '#f1f5f9' }}>
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: hasLocalIntrusion ? '#ef4444' : '#10b981',
+                        boxShadow: hasLocalIntrusion ? '0 0 8px #ef4444' : '0 0 6px #10b981',
+                      }}
+                    />
+                    <span>{camMeta.name || gridCamId}</span>
+                    <span style={{ color: '#64748b', fontSize: '0.72rem', fontFamily: 'var(--font-mono)' }}>({gridCamId})</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {hasLocalIntrusion && (
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: 800,
+                          color: '#ef4444',
+                          background: 'rgba(239, 68, 68, 0.2)',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        ALERT ACTIVE
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectCamera?.(gridCamId);
+                        setViewLayout('single');
+                      }}
+                      style={{
+                        background: 'rgba(14, 165, 233, 0.2)',
+                        border: '1px solid rgba(14, 165, 233, 0.5)',
+                        color: '#38bdf8',
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: '4px',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      Focus View
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tactical Tile Feed Viewport */}
+                <div
+                  style={{
+                    position: 'relative',
+                    flex: 1,
+                    minHeight: '220px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#000000',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={getLiveFeedUrl(gridCamId, { v: streamKey })}
+                    alt={`Surveillance feed ${gridCamId}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                    onError={(e) => {
+                      e.target.style.opacity = '0.35';
+                    }}
+                  />
+
+                  {/* Corner reticles for tactical aesthetics */}
+                  <div style={{ position: 'absolute', top: 6, left: 6, width: 10, height: 10, borderTop: '1.5px solid #38bdf8', borderLeft: '1.5px solid #38bdf8', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', top: 6, right: 6, width: 10, height: 10, borderTop: '1.5px solid #38bdf8', borderRight: '1.5px solid #38bdf8', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', bottom: 6, left: 6, width: 10, height: 10, borderBottom: '1.5px solid #38bdf8', borderLeft: '1.5px solid #38bdf8', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', bottom: 6, right: 6, width: 10, height: 10, borderBottom: '1.5px solid #38bdf8', borderRight: '1.5px solid #38bdf8', pointerEvents: 'none' }} />
+
+                  {/* Tile Bottom Telemetry Overlay */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '8px',
+                      left: '8px',
+                      right: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(2, 6, 23, 0.75)',
+                      backdropFilter: 'blur(4px)',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '4px',
+                      fontSize: '0.68rem',
+                      fontFamily: 'var(--font-mono)',
+                      color: '#94a3b8',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                      ● LIVE INGEST
+                    </span>
+                    <span>HD 1280x720</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div
+          ref={videoContainerRef}
+          className={`live-viewport-container video-viewport ${isFullscreen ? 'fullscreen-mode' : ''}`}
+        >
         {/* Optical HUD Crosshair & Reticles */}
         <div className="reticle top-left" />
         <div className="reticle top-right" />
@@ -1138,6 +1577,7 @@ export default function LiveVideoFeed({
             />
             <canvas
               ref={webcamCanvasRef}
+              onClick={handleCanvasClick}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -1145,7 +1585,8 @@ export default function LiveVideoFeed({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                pointerEvents: 'none',
+                pointerEvents: isDrawingFence ? 'auto' : 'none',
+                cursor: isDrawingFence ? 'crosshair' : 'default',
                 transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
               }}
             />
@@ -1402,7 +1843,9 @@ export default function LiveVideoFeed({
               setHasError(false);
             }}
             onError={() => {
-              setHasError(true);
+              if (streamMode !== 'browser_webcam') {
+                setHasError(true);
+              }
             }}
           />
         )}
@@ -1511,7 +1954,7 @@ export default function LiveVideoFeed({
         </div>
 
         {/* Fallback Display if stream disconnects */}
-        {hasError && (
+        {hasError && streamMode !== 'browser_webcam' && !manuallyStopped && (
           <div className="stream-error-overlay">
             <AlertTriangle size={36} style={{ color: '#fbbf24', marginBottom: '0.5rem' }} />
             <div className="error-heading" style={{ fontSize: '1rem', fontWeight: 800, color: '#f8fafc' }}>
@@ -1565,6 +2008,7 @@ export default function LiveVideoFeed({
           </div>
         )}
       </div>
+      )}
 
       {/* Feed Panel Footer */}
       <div className="live-feed-footer" style={{ padding: '0.75rem 1.1rem' }}>
