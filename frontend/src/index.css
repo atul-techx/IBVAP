@@ -4455,89 +4455,207 @@ body {
   line-height: 1.6;
 }
 
-.pipeline-flow-wrapper {
+/* --- 4. TACTICAL DEFENSE PIPELINE ARCHITECTURE (Redesigned) --- */
+.section-pipeline {
+  padding: 6rem 0;
+  background: radial-gradient(circle at 50% 15%, #0d1a36 0%, #060b18 70%);
+  border-top: 1px solid rgba(56, 189, 248, 0.15);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.15);
   position: relative;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 2.5rem 0 1rem;
+  overflow: hidden;
 }
 
-.sine-wave-track {
+.section-pipeline::before {
+  content: '';
   position: absolute;
-  top: 55px;
-  left: 5%;
-  right: 5%;
-  height: 90px;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
   pointer-events: none;
-  z-index: 1;
 }
 
-.sine-wave-svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
+.section-pipeline .section-title {
+  color: #f8fafc;
 }
 
-.pipeline-steps-grid {
+.section-pipeline .section-subtext {
+  color: #94a3b8;
+  max-width: 800px;
+  margin: 0.75rem auto 0;
+}
+
+.tactical-pipeline-matrix {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-top: 3.5rem;
   position: relative;
   z-index: 2;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 1.25rem;
 }
 
-.step-node {
+.tactical-stage-card {
+  flex: 1;
+  background: rgba(11, 23, 48, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 10px;
+  padding: 1.35rem 1.05rem;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
 }
 
-.step-circle-icon {
-  width: 74px;
-  height: 74px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid #cbd5e1;
+.tactical-stage-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 16px 32px rgba(2, 132, 199, 0.2);
+}
+
+.tactical-stage-card.highlighted-core {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.18) 0%, rgba(11, 23, 48, 0.95) 100%);
+  border: 1.5px solid #00f0ff;
+  box-shadow: 0 0 30px rgba(0, 240, 255, 0.25), 0 12px 28px rgba(0, 0, 0, 0.4);
+}
+
+.core-glow-indicator {
+  position: absolute;
+  top: 0;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: #00f0ff;
+  box-shadow: 0 0 12px #00f0ff, 0 0 24px #00f0ff;
+}
+
+.stage-top-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.9rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.stage-code {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.stage-code.core {
+  color: #00f0ff;
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.4);
+}
+
+.stage-protocol {
+  color: #64748b;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+}
+
+.stage-protocol.core {
+  color: #38bdf8;
+}
+
+.stage-icon-wrap {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0284c7;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
-  margin-bottom: 1.25rem;
-  transition: all 0.25s ease;
+  color: #38bdf8;
+  margin-bottom: 0.9rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
 }
 
-.step-circle-icon:hover {
-  transform: scale(1.08);
-  border-color: #0284c7;
-}
-
-.step-circle-icon.accent {
+.stage-icon-wrap.core {
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-  border-color: #0284c7;
-  color: #fff;
-  box-shadow: 0 6px 20px rgba(2, 132, 199, 0.4);
+  border-color: #00f0ff;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.45);
 }
 
-.step-label {
-  font-size: 0.95rem;
+.tactical-stage-card:hover .stage-icon-wrap {
+  transform: scale(1.08);
+}
+
+.stage-heading {
+  font-size: 0.98rem;
   font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 0.35rem;
+  color: #f8fafc;
+  margin: 0 0 0.45rem;
+  letter-spacing: -0.01em;
 }
 
-.step-desc {
-  font-size: 0.78rem;
-  color: #64748b;
-  line-height: 1.4;
-  max-width: 180px;
+.stage-description {
+  font-size: 0.76rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin: 0 0 1.15rem;
+  flex: 1;
 }
 
-/* --- 5. "IBVAP PLATFORM" 3 FEATURE CARDS (Image 3) --- */
+.stage-telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: auto;
+}
+
+.stage-chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+}
+
+.stage-chip.core {
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.tactical-stage-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.1rem;
+  position: relative;
+}
+
+.connector-arrow {
+  color: #0284c7;
+  opacity: 0.7;
+  animation: pulseArrow 2s infinite ease-in-out;
+}
+
+@keyframes pulseArrow {
+  0%, 100% { transform: translateX(0); opacity: 0.4; }
+  50% { transform: translateX(3px); opacity: 1; color: #00f0ff; }
+}
+
+/* --- 5. "IBVAP PLATFORM" 3 FEATURE CARDS (Enhanced) --- */
 .section-platform-cards {
-  padding: 5rem 0;
-  background: #ffffff;
+  padding: 5.5rem 0;
+  background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
 
@@ -4545,38 +4663,39 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 2rem;
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
 .platform-feature-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-direction: column;
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.28s ease;
 }
 
 .platform-feature-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.09);
+  transform: translateY(-5px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  border-color: #cbd5e1;
 }
 
 .card-top-bar {
   height: 4px;
-  background: #ea580c; /* Accent orange matching Image 3 */
+  background: #ea580c;
   width: 100%;
 }
 
 .platform-feature-card .card-header {
-  padding: 1.25rem 1.25rem 0.75rem;
+  padding: 1.25rem 1.35rem 0.85rem;
 }
 
 .platform-feature-card .card-title {
-  font-size: 1.05rem;
+  font-size: 1.02rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: #0f172a;
@@ -4584,10 +4703,20 @@ body {
   margin: 0;
 }
 
+.card-subtitle-tag {
+  display: block;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #0284c7;
+  margin-top: 0.25rem;
+  letter-spacing: 0.02em;
+}
+
 .card-image-wrap {
   position: relative;
   aspect-ratio: 16 / 10;
-  background: #0f172a;
+  background: #0b1329;
   overflow: hidden;
 }
 
@@ -4596,82 +4725,53 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 0.4s ease;
+}
+
+.platform-feature-card:hover .card-feature-img {
+  transform: scale(1.04);
 }
 
 .card-badge-chip {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(15, 23, 42, 0.88);
   color: #22c55e;
   font-family: var(--font-mono, monospace);
   font-size: 0.68rem;
   font-weight: 700;
-  padding: 0.2rem 0.55rem;
+  padding: 0.22rem 0.6rem;
   border-radius: 4px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  z-index: 2;
+}
+
+.card-badge-chip.red-badge {
+  color: #ef4444;
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.card-telemetry-hud-strip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(11, 19, 41, 0.9);
   backdrop-filter: blur(4px);
-}
-
-.tactical-alerts-mockup {
-  height: 100%;
-  background: #0f172a;
-  padding: 0.85rem;
+  padding: 0.45rem 0.85rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.mockup-alert-row {
-  background: #1e293b;
-  border-radius: 6px;
-  padding: 0.6rem 0.75rem;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.65rem;
-  border-left: 3px solid;
-}
-
-.mockup-alert-row.critical {
-  border-left-color: #ef4444;
-}
-
-.mockup-alert-row.success {
-  border-left-color: #22c55e;
-}
-
-.alert-thumb {
-  margin-top: 2px;
-}
-
-.alert-details {
-  display: flex;
-  flex-direction: column;
-}
-
-.alert-loc {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #f8fafc;
-}
-
-.alert-cam {
-  font-size: 0.68rem;
-  color: #94a3b8;
-}
-
-.alert-tag {
-  font-size: 0.72rem;
-  font-weight: 700;
-  margin: 0.15rem 0;
-}
-
-.alert-tag.red { color: #f87171; }
-.alert-tag.green { color: #4ade80; }
-
-.alert-timestamp {
-  font-size: 0.62rem;
-  color: #64748b;
+  justify-content: space-between;
   font-family: var(--font-mono, monospace);
+  font-size: 0.64rem;
+  color: #38bdf8;
+  border-top: 1px solid rgba(56, 189, 248, 0.25);
+  z-index: 2;
 }
 
 .telemetry-bar-overlay {
@@ -4679,13 +4779,15 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(15, 23, 42, 0.9);
   backdrop-filter: blur(4px);
   padding: 0.5rem 0.85rem;
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono, monospace);
   font-size: 0.68rem;
+  border-top: 1px solid rgba(56, 189, 248, 0.25);
+  z-index: 2;
 }
 
 .telem-item {
@@ -4694,8 +4796,8 @@ body {
 }
 
 .telem-label {
-  color: #64748b;
-  font-size: 0.6rem;
+  color: #94a3b8;
+  font-size: 0.58rem;
 }
 
 .telem-val {
@@ -4708,15 +4810,40 @@ body {
 }
 
 .platform-feature-card .card-body {
-  padding: 1.25rem;
+  padding: 1.35rem;
   flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .card-body-text {
-  font-size: 0.88rem;
-  color: #64748b;
-  line-height: 1.55;
+  font-size: 0.86rem;
+  color: #475569;
+  line-height: 1.6;
   margin: 0;
+}
+
+.card-capabilities-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.cap-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.77rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.cap-item svg {
+  color: #0284c7;
+  flex-shrink: 0;
 }
 
 /* --- 6. GAIN AN EDGE SECTION --- */
@@ -5175,11 +5302,15 @@ body {
     grid-template-columns: 1fr;
     gap: 2.5rem;
   }
-  .pipeline-steps-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
+  .tactical-pipeline-matrix {
+    flex-wrap: wrap;
+    gap: 1rem;
   }
-  .sine-wave-track {
+  .tactical-stage-card {
+    min-width: calc(50% - 0.5rem);
+    flex: initial;
+  }
+  .tactical-stage-connector {
     display: none;
   }
   .platform-cards-grid {
@@ -5206,8 +5337,8 @@ body {
   .hero-title {
     font-size: 2rem;
   }
-  .pipeline-steps-grid {
-    grid-template-columns: 1fr;
+  .tactical-stage-card {
+    min-width: 100%;
   }
   .footer-grid {
     grid-template-columns: 1fr;

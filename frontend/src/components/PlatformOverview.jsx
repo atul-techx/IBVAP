@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
+  Shield,
   Radio,
   Eye,
   Camera,
@@ -25,6 +26,10 @@ import {
   TrendingUp,
   FileCheck,
   Zap,
+  Crosshair,
+  Activity,
+  Video,
+  Terminal,
 } from 'lucide-react';
 
 export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, isAuthenticated, user }) {
@@ -58,35 +63,35 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
     },
     {
       id: 'military-anpr',
-      title: 'Tactical Vehicle ANPR & Checkpoint Clearance',
-      subtitle: 'CAM 04 • Gate 1 Checkpoint • 23:48 PM',
-      rawImage: '/images/military_checkpoint_gate.jpg',
+      title: 'Checkpoint ANPR & Convoy Access Control',
+      subtitle: 'CAM 04 • Gate 4 Outbound Checkpoint • 14:38 PM',
+      rawImage: '/images/real_checkpoint_anpr.jpg',
       labelAi: 'ANPR + Checkpoint AI Overlay',
-      labelRaw: 'Raw Camera Feed',
-      description: 'High-speed OCR neural network reads tactical vehicle plate, cross-references against authorized defense logistics whitelist, and prompts automated boom barrier clearance.',
-      detectionTag: 'PLATE READ: AZ-411-S • CLEARANCE GRANTED',
+      labelRaw: 'Raw CCTV Stream',
+      description: 'Multi-frame OCR neural network identifies military patrol vehicle, extracts license plate (D 487-GKJ) with grammar consensus correction, cross-references defense whitelist, and triggers automated boom barrier clearance.',
+      detectionTag: 'PLATE READ: D 487-GKJ • CLEARANCE GRANTED',
       hudOverlay: {
         type: 'anpr',
-        coords: { top: '38%', left: '29%', width: '27%', height: '38%' },
-        label: 'TACTICAL UNIT • AZ-411-S',
-        sublabel: 'Command Escort Patrol • AUTHORIZED',
+        coords: { top: '35%', left: '44%', width: '25%', height: '37%' },
+        label: 'TACTICAL UNIT • D 487-GKJ',
+        sublabel: 'Patrol Vehicle • AUTHORIZED ENTRY',
         severity: 'authorized',
       },
     },
     {
       id: 'border-perimeter',
-      title: 'High-Security Perimeter Surveillance & Tracking',
-      subtitle: 'CAM 07 • West Perimeter Watchtower • 16:32 PM',
-      rawImage: '/images/border_fence_cctv.jpg',
+      title: 'Demarcation Perimeter Surveillance & Tracking',
+      subtitle: 'CAM 08 • Border Watchtower & Sensor Mast • 14:32 PM',
+      rawImage: '/images/real_border_fence_tracking.jpg',
       labelAi: 'Autonomous Sector Telemetry',
       labelRaw: 'Raw Video Feed',
-      description: 'Long-range optical tracking monitors border fence integrity, auto-calibrating for ambient sunlight and shadows while tracking movement vectors near watchtower outpost.',
-      detectionTag: 'ZONE SECURE • ZERO ANOMALIES',
+      description: 'Long-range PTZ camera array and infrared sensor mast track border demarcation wire mesh integrity, auto-calibrating for ambient sunlight, shadows, and optical flow across the perimeter patrol track.',
+      detectionTag: 'SECTOR DEMARCATION • ZERO ANOMALIES',
       hudOverlay: {
         type: 'zone',
-        coords: { top: '32%', left: '38%', width: '26%', height: '48%' },
-        label: 'SECTOR 7 PERIMETER • MONITORED',
-        sublabel: 'Optical Flow: Static • Fence Intact',
+        coords: { top: '24%', left: '32%', width: '38%', height: '52%' },
+        label: 'SECTOR 8 DEMARCATION • MONITORED',
+        sublabel: 'Optical Flow: Static • Perimeter Intact',
         severity: 'secure',
       },
     },
@@ -258,27 +263,27 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
                 <div className="mockup-dots">
                   <span></span><span></span><span></span>
                 </div>
-                <div className="mockup-title">SECTOR 4 PERIMETER COMMAND • LIVE RTSP FEED</div>
+                <div className="mockup-title">SECTOR 04 PERIMETER COMMAND • LIVE RTSP FEED</div>
                 <div className="mockup-badge">
                   <span className="pulse-dot"></span> LIVE 1080p
                 </div>
               </div>
               <div className="mockup-media">
                 <img
-                  src="/images/border_fence_cctv.jpg"
-                  alt="Military Border Perimeter Surveillance Feed"
+                  src="/images/real_border_perimeter_cctv.jpg"
+                  alt="Authentic Military Border Perimeter CCTV Stream"
                   className="mockup-img"
                 />
                 <div className="mockup-overlay-hud">
                   <div className="hud-corner top-left">
-                    <span>CAM 07 - SECTOR 4 NORTH</span>
-                    <span className="hud-time">FPS: 29.8 | YUNET + YOLOV8</span>
+                    <span>CH 04 - NORTH PERIMETER DEMARCATION</span>
+                    <span className="hud-time">FPS: 29.8 | YOLOV8 + YUNET ACTIVE</span>
                   </div>
                   <div className="hud-target-box">
-                    <span className="hud-target-tag">PERIMETER FENCE LINE INTACT</span>
+                    <span className="hud-target-tag">PERIMETER WIRE & TRACK SECURE</span>
                   </div>
                   <div className="hud-corner bottom-right">
-                    <span>STATUS: OPERATIONAL</span>
+                    <span>STATUS: OPERATIONAL (LOCAL EDGE)</span>
                   </div>
                 </div>
               </div>
@@ -466,80 +471,145 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       </section>
 
       {/* ========================================================================= */}
-      {/* 4. "GETTING STARTED IS EFFORTLESS" 5-STEP PIPELINE (Image 2)              */}
+      {/* ========================================================================= */}
+      {/* 4. TACTICAL DEFENSE PIPELINE ARCHITECTURE (Redesigned)                     */}
       {/* ========================================================================= */}
       <section id="pipeline-flow" className="section-pipeline">
         <div className="section-container">
           <div className="section-title-wrap text-center">
-            <div className="section-badge">TACTICAL ARCHITECTURE</div>
-            <h2 className="section-title">Getting Started with IBVAP is Effortless</h2>
+            <div className="section-badge">
+              <Activity size={13} />
+              <span>DEFENSE MISSION ARCHITECTURE</span>
+            </div>
+            <h2 className="section-title">Autonomous Edge-to-Command Defense Pipeline</h2>
             <p className="section-subtext">
-              Zero hardware replacement required. IBVAP connects seamlessly with your existing military CCTV,
-              DVR/NVR encoders, and tactical field networks.
+              Engineered for mission-critical military defense. IBVAP processes multi-spectral optical, thermal,
+              and sensor streams at the air-gapped tactical edge, providing sub-150ms autonomous threat interception without cloud dependency.
             </p>
           </div>
 
-          <div className="pipeline-flow-wrapper">
-            {/* The Dual Sine Wave Background Track */}
-            <div className="sine-wave-track">
-              <svg viewBox="0 0 1000 120" preserveAspectRatio="none" className="sine-wave-svg">
-                <path
-                  d="M 0,60 C 100,10 150,110 250,60 C 350,10 400,110 500,60 C 600,10 650,110 750,60 C 850,10 900,110 1000,60"
-                  fill="none"
-                  stroke="#0284c7"
-                  strokeWidth="2.5"
-                  opacity="0.8"
-                />
-                <path
-                  d="M 0,60 C 100,110 150,10 250,60 C 350,110 400,10 500,60 C 600,110 650,10 750,60 C 850,110 900,10 1000,60"
-                  fill="none"
-                  stroke="#ea580c"
-                  strokeWidth="2.5"
-                  opacity="0.8"
-                />
-              </svg>
+          <div className="tactical-pipeline-matrix">
+            {/* Stage 1 */}
+            <div className="tactical-stage-card">
+              <div className="stage-top-meta">
+                <span className="stage-code">STAGE 01</span>
+                <span className="stage-protocol">RTSP • ONVIF • PTZ</span>
+              </div>
+              <div className="stage-icon-wrap">
+                <Camera size={24} />
+              </div>
+              <h3 className="stage-heading">Sector Acquisition</h3>
+              <p className="stage-description">
+                Direct ingest from existing border CCTV, thermal IR optics, watchtower sensors, and tactical drone feeds.
+              </p>
+              <div className="stage-telemetry">
+                <span className="stage-chip">Zero Hardware Swap</span>
+                <span className="stage-chip">Multi-Spectral</span>
+              </div>
             </div>
 
-            {/* 5 Step Nodes */}
-            <div className="pipeline-steps-grid">
-              <div className="step-node">
-                <div className="step-circle-icon">
-                  <Camera size={26} />
-                </div>
-                <div className="step-label">Suitably Positioned Cameras</div>
-                <div className="step-desc">Existing border CCTV, thermal optics & PTZ sensors</div>
-              </div>
+            {/* Connector */}
+            <div className="tactical-stage-connector">
+              <div className="connector-line"></div>
+              <div className="connector-pulse"></div>
+              <ChevronRight size={18} className="connector-arrow" />
+            </div>
 
-              <div className="step-node">
-                <div className="step-circle-icon">
-                  <Server size={26} />
-                </div>
-                <div className="step-label">DVR / NVR Encoders</div>
-                <div className="step-desc">Standard H.264 / H.265 RTSP video stream ingest</div>
+            {/* Stage 2 */}
+            <div className="tactical-stage-card">
+              <div className="stage-top-meta">
+                <span className="stage-code">STAGE 02</span>
+                <span className="stage-protocol">H.264 / H.265 INGEST</span>
               </div>
-
-              <div className="step-node">
-                <div className="step-circle-icon">
-                  <Wifi size={26} />
-                </div>
-                <div className="step-label">Consistent Network</div>
-                <div className="step-desc">Tactical field LAN, encrypted microwave or 4G/5G link</div>
+              <div className="stage-icon-wrap">
+                <Server size={24} />
               </div>
-
-              <div className="step-node highlighted">
-                <div className="step-circle-icon accent">
-                  <Cpu size={28} />
-                </div>
-                <div className="step-label">IBVAP (AI Engine)</div>
-                <div className="step-desc">YOLOv8 + YuNet + EasyOCR + Tamper verification core</div>
+              <h3 className="stage-heading">Stream Gateway</h3>
+              <p className="stage-description">
+                Multi-threaded frame buffer with auto-reconnection watchdog, jitter smoothing, and local edge caching.
+              </p>
+              <div className="stage-telemetry">
+                <span className="stage-chip">Auto Reconnect</span>
+                <span className="stage-chip">Zero Packet Drop</span>
               </div>
+            </div>
 
-              <div className="step-node">
-                <div className="step-circle-icon">
-                  <Laptop size={26} />
-                </div>
-                <div className="step-label">Instant Insights (Command Client)</div>
-                <div className="step-desc">Operator video wall, real-time alerts & voice dispatch</div>
+            {/* Connector */}
+            <div className="tactical-stage-connector">
+              <div className="connector-line"></div>
+              <div className="connector-pulse"></div>
+              <ChevronRight size={18} className="connector-arrow" />
+            </div>
+
+            {/* Stage 3 (Highlighted Core) */}
+            <div className="tactical-stage-card highlighted-core">
+              <div className="core-glow-indicator"></div>
+              <div className="stage-top-meta">
+                <span className="stage-code core">STAGE 03 // AI CORE</span>
+                <span className="stage-protocol core">YOLOv8 + YUNET + OCR</span>
+              </div>
+              <div className="stage-icon-wrap core">
+                <Cpu size={26} />
+              </div>
+              <h3 className="stage-heading">Neural Inference Core</h3>
+              <p className="stage-description">
+                Simultaneous real-time target tracking, biometric facial matching, ANPR plate consensus, and speed radar.
+              </p>
+              <div className="stage-telemetry">
+                <span className="stage-chip core">&lt; 15ms Inference</span>
+                <span className="stage-chip core">99.4% Catch Rate</span>
+              </div>
+            </div>
+
+            {/* Connector */}
+            <div className="tactical-stage-connector">
+              <div className="connector-line"></div>
+              <div className="connector-pulse"></div>
+              <ChevronRight size={18} className="connector-arrow" />
+            </div>
+
+            {/* Stage 4 */}
+            <div className="tactical-stage-card">
+              <div className="stage-top-meta">
+                <span className="stage-code">STAGE 04</span>
+                <span className="stage-protocol">HMAC SHA-256 LEDGER</span>
+              </div>
+              <div className="stage-icon-wrap">
+                <Lock size={24} />
+              </div>
+              <h3 className="stage-heading">Forensic Integrity</h3>
+              <p className="stage-description">
+                Camera blind/occlusion tamper detection, acoustic gunshot elevation, and tamper-proof digital signature chain.
+              </p>
+              <div className="stage-telemetry">
+                <span className="stage-chip">Anti-Tamper Sensor</span>
+                <span className="stage-chip">Court-Admissible</span>
+              </div>
+            </div>
+
+            {/* Connector */}
+            <div className="tactical-stage-connector">
+              <div className="connector-line"></div>
+              <div className="connector-pulse"></div>
+              <ChevronRight size={18} className="connector-arrow" />
+            </div>
+
+            {/* Stage 5 */}
+            <div className="tactical-stage-card">
+              <div className="stage-top-meta">
+                <span className="stage-code">STAGE 05</span>
+                <span className="stage-protocol">WEBSOCKET + TTS VOICE</span>
+              </div>
+              <div className="stage-icon-wrap">
+                <Radio size={24} />
+              </div>
+              <h3 className="stage-heading">Tactical Dispatch</h3>
+              <p className="stage-description">
+                Sub-150ms live video matrix, interactive PTZ tracking, hands-free priority voice alerts, and incident dossiers.
+              </p>
+              <div className="stage-telemetry">
+                <span className="stage-chip">Hands-Free Audio</span>
+                <span className="stage-chip">&lt; 150ms HUD Sync</span>
               </div>
             </div>
           </div>
@@ -547,16 +617,16 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       </section>
 
       {/* ========================================================================= */}
-      {/* 5. "IBVAP PLATFORM" 3 FEATURE CARDS (Image 3)                             */}
+      {/* 5. "IBVAP PLATFORM" 3 FEATURE CARDS (Real Images + Actual Platform Capabilities) */}
       {/* ========================================================================= */}
       <section id="platform-cards" className="section-platform-cards">
         <div className="section-container">
           <div className="section-title-wrap text-center">
             <div className="section-badge">COMMAND CENTER CAPABILITIES</div>
-            <h2 className="section-title">IBVAP Tactical Platform</h2>
+            <h2 className="section-title">Built for the Defense Command Operator</h2>
             <p className="section-subtext">
-              IBVAP offers an operator-first AI video analytics dashboard to monitor border sectors,
-              receive tactical real-time alerts, and coordinate rapid response teams.
+              Real-world operational capabilities engineered directly into the IBVAP platform—from multi-camera 
+              video walls and automated voice alarms to biometric face matching and cryptographic forensic logging.
             </p>
           </div>
 
@@ -565,21 +635,35 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
             <div className="platform-feature-card">
               <div className="card-top-bar"></div>
               <div className="card-header">
-                <h3 className="card-title">DYNAMIC VIDEO WALL</h3>
+                <h3 className="card-title">DYNAMIC TACTICAL VIDEO WALL</h3>
+                <span className="card-subtitle-tag">Centralized Multi-Sector Command Matrix</span>
               </div>
               <div className="card-image-wrap">
                 <img
-                  src="/images/military_cctv_wall.jpg"
-                  alt="Multi-camera dynamic video wall"
+                  src="/images/real_tactical_videowall.jpg"
+                  alt="Multi-camera dynamic video wall in military operations center"
                   className="card-feature-img"
                 />
-                <div className="card-badge-chip">9/9 FEEDS ONLINE</div>
+                <div className="card-badge-chip">
+                  <span className="pulse-dot green"></span> 9/9 FEEDS ONLINE
+                </div>
+                <div className="card-telemetry-hud-strip">
+                  <span>MATRIX: 3x3 GRID</span>
+                  <span>WATCHDOG: ACTIVE</span>
+                </div>
               </div>
               <div className="card-body">
                 <p className="card-body-text">
-                  Video Wall panel enables live centralized monitoring of all perimeter sectors, watchtowers,
-                  and checkpoint gates from a single unified tactical screen matrix with automatic anomaly elevation.
+                  In high-pressure border posts, operators cannot manually toggle dozens of cameras. IBVAP aggregates 
+                  all sector cameras—perimeter razor wire, watchtowers, and vehicle gates—into a unified matrix. 
+                  When any breach occurs, the platform spotlights the active camera, renders YOLOv8 bounding boxes, and 
+                  enables instant PTZ camera tracking.
                 </p>
+                <div className="card-capabilities-list">
+                  <div className="cap-item"><CheckCircle2 size={14} /> Multi-Feed Grid & 1-Click Sector Focus</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Interactive PTZ Pan, Tilt & Zoom Controls</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Automated RTSP Stream Reconnection Watchdog</div>
+                </div>
               </div>
             </div>
 
@@ -587,40 +671,35 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
             <div className="platform-feature-card">
               <div className="card-top-bar"></div>
               <div className="card-header">
-                <h3 className="card-title">MULTIPLE REAL TIME ALERTS</h3>
+                <h3 className="card-title">INSTANT VOICE & TACTICAL HUD ALERTS</h3>
+                <span className="card-subtitle-tag">Zero-Fatigue Threat Elevation & Speech Dispatch</span>
               </div>
-              <div className="card-image-wrap alerts-feed-wrap">
-                <div className="tactical-alerts-mockup">
-                  <div className="mockup-alert-row critical">
-                    <div className="alert-thumb">
-                      <ShieldAlert size={18} className="text-red" />
-                    </div>
-                    <div className="alert-details">
-                      <div className="alert-loc">Location: Sector 4 Razor Wire</div>
-                      <div className="alert-cam">Camera: North Perimeter CAM-04</div>
-                      <div className="alert-tag red">Event: Perimeter Intrusion Detected</div>
-                      <div className="alert-timestamp">04:18:22 AM • Oct 21</div>
-                    </div>
-                  </div>
-
-                  <div className="mockup-alert-row success">
-                    <div className="alert-thumb">
-                      <Car size={18} className="text-green" />
-                    </div>
-                    <div className="alert-details">
-                      <div className="alert-loc">Location: Gate 1 Main Barrier</div>
-                      <div className="alert-cam">Camera: Checkpoint Entry CAM-01</div>
-                      <div className="alert-tag green">Event: ANPR Verified (Patrol Truck)</div>
-                      <div className="alert-timestamp">11:42:05 AM • Oct 21</div>
-                    </div>
-                  </div>
+              <div className="card-image-wrap">
+                <img
+                  src="/images/real_alerts_dispatch.jpg"
+                  alt="Real-time tactical incident alerts dashboard"
+                  className="card-feature-img"
+                />
+                <div className="card-badge-chip red-badge">
+                  <span className="pulse-dot red"></span> CRITICAL DISPATCH
+                </div>
+                <div className="card-telemetry-hud-strip">
+                  <span>VOICE SYNTHESIS: READY</span>
+                  <span>SHA-256: SIGNED</span>
                 </div>
               </div>
               <div className="card-body">
                 <p className="card-body-text">
-                  Get instant tactical notifications on violations to detect, verify, and act on critical events
-                  with hands-free speech alerts and SHA-256 tamper-evident digital forensic snapshots.
+                  Surveillance fatigue leads to missed breaches. IBVAP solves this with hands-free priority voice alerts 
+                  announcing <em>'Unknown person in area'</em> or <em>'Unknown vehicle in area'</em>. Simultaneously 
+                  triggers polygon geofence tripwire alarms, unauthorized ANPR plate warnings, and camera occlusion 
+                  tamper alerts backed by HMAC SHA-256 digital forensic signatures.
                 </p>
+                <div className="card-capabilities-list">
+                  <div className="cap-item"><CheckCircle2 size={14} /> Hands-Free Tactical Voice Speech Synthesis</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Custom Polygon Geofencing & Tripwire Breach</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Immutable SHA-256 Digital Forensic Chain</div>
+                </div>
               </div>
             </div>
 
@@ -628,34 +707,45 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
             <div className="platform-feature-card">
               <div className="card-top-bar"></div>
               <div className="card-header">
-                <h3 className="card-title">LIVE FEEDS & TELEMETRY</h3>
+                <h3 className="card-title">LIVE TELEMETRY, BIOMETRICS & ANPR</h3>
+                <span className="card-subtitle-tag">Sub-150ms Streaming with Multi-Modal AI</span>
               </div>
               <div className="card-image-wrap">
                 <img
-                  src="/images/military_checkpoint_gate.jpg"
-                  alt="Live feeds and camera telemetry"
+                  src="/images/real_cctv_telemetry.jpg"
+                  alt="Live feeds, biometric facial recognition and license plate telemetry"
                   className="card-feature-img"
                 />
+                <div className="card-badge-chip">
+                  <span className="pulse-dot green"></span> &lt; 42ms LATENCY
+                </div>
                 <div className="telemetry-bar-overlay">
                   <div className="telem-item">
-                    <span className="telem-label">Status</span>
-                    <span className="telem-val green">● ONLINE</span>
+                    <span className="telem-label">Biometric Match</span>
+                    <span className="telem-val green">98% CONFIRMED</span>
                   </div>
                   <div className="telem-item">
-                    <span className="telem-label">Bitrate</span>
-                    <span className="telem-val">4200 kbps</span>
+                    <span className="telem-label">Plate Read</span>
+                    <span className="telem-val">MIL-7341 (UK)</span>
                   </div>
                   <div className="telem-item">
-                    <span className="telem-label">Resolution</span>
-                    <span className="telem-val">1080p 30fps</span>
+                    <span className="telem-label">Speed Radar</span>
+                    <span className="telem-val">34 km/h (CAL)</span>
                   </div>
                 </div>
               </div>
               <div className="card-body">
                 <p className="card-body-text">
-                  Access sub-second live feeds of your defense cameras anytime with real-time biometric
-                  facial matching, vehicle plate readings, and camera occlusion tamper alarms.
+                  Delivers sub-150ms real-time WebSocket video streams paired with YuNet biometric face recognition 
+                  cross-matching defense watchlists in real time. Features homography speed estimation to flag speeding 
+                  convoys, multi-frame OCR consensus plate verification, and automated night-vision CLAHE contrast filters 
+                  for zero-light, fog, or dust storms.
                 </p>
+                <div className="card-capabilities-list">
+                  <div className="cap-item"><CheckCircle2 size={14} /> YuNet Face Biometrics vs Military Watchlist</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Homography Vehicle Speed & Direction Radar</div>
+                  <div className="cap-item"><CheckCircle2 size={14} /> Night-Vision CLAHE Fog & Dehazing Filter</div>
+                </div>
               </div>
             </div>
           </div>
