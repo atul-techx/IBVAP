@@ -62,37 +62,37 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       },
     },
     {
-      id: 'military-anpr',
-      title: 'Checkpoint ANPR & Convoy Access Control',
-      subtitle: 'CAM 04 • Gate 4 Outbound Checkpoint • 14:38 PM',
-      rawImage: '/images/real_checkpoint_anpr.jpg',
-      labelAi: 'ANPR + Checkpoint AI Overlay',
-      labelRaw: 'Raw CCTV Stream',
-      description: 'Multi-frame OCR neural network identifies military patrol vehicle, extracts license plate (D 487-GKJ) with grammar consensus correction, cross-references defense whitelist, and triggers automated boom barrier clearance.',
-      detectionTag: 'PLATE READ: D 487-GKJ • CLEARANCE GRANTED',
+      id: 'bsf-patrol',
+      title: 'Frontier Sentry Patrol & Perimeter Tracking',
+      subtitle: 'CAM 06 • Border Zero-Line Sector 8 • 11:24 AM',
+      rawImage: '/images/bsf_patrol_fence.png',
+      labelAi: 'Sentry Formation & Perimeter AI',
+      labelRaw: 'Raw Video Feed',
+      description: 'Multi-target neural tracking continuously monitors Border Security Force foot patrol formations along zero-line demarcation fencing, verifying sentry biometric telemetry and perimeter fence integrity.',
+      detectionTag: 'BSF SENTRY PATROL • 7 PERSONNEL DETECTED • NOMINAL',
       hudOverlay: {
-        type: 'anpr',
-        coords: { top: '35%', left: '44%', width: '25%', height: '37%' },
-        label: 'TACTICAL UNIT • D 487-GKJ',
-        sublabel: 'Patrol Vehicle • AUTHORIZED ENTRY',
-        severity: 'authorized',
+        type: 'patrol',
+        coords: { top: '32%', left: '20%', width: '42%', height: '58%' },
+        label: 'BSF PATROL FORMATION • 96.8%',
+        sublabel: 'Demarcation Sentry Unit • Intact',
+        severity: 'secure',
       },
     },
     {
-      id: 'border-perimeter',
-      title: 'Demarcation Perimeter Surveillance & Tracking',
-      subtitle: 'CAM 08 • Border Watchtower & Sensor Mast • 14:32 PM',
-      rawImage: '/images/real_border_fence_tracking.jpg',
-      labelAi: 'Autonomous Sector Telemetry',
-      labelRaw: 'Raw Video Feed',
-      description: 'Long-range PTZ camera array and infrared sensor mast track border demarcation wire mesh integrity, auto-calibrating for ambient sunlight, shadows, and optical flow across the perimeter patrol track.',
-      detectionTag: 'SECTOR DEMARCATION • ZERO ANOMALIES',
+      id: 'military-convoy',
+      title: 'Mountain Checkpoint & Convoy Movement ANPR',
+      subtitle: 'CAM 02 • High-Altitude Transit Checkpost • 14:15 PM',
+      rawImage: '/images/army_convoy_checkpoint.png',
+      labelAi: 'Convoy Telemetry & Tactical ANPR',
+      labelRaw: 'Raw CCTV Stream',
+      description: 'Automated vehicle recognition and optical character consensus track military convoy troop carriers through mountain transit passes, validating defense convoy manifests and automated barrier clearance.',
+      detectionTag: 'DEFENSE CONVOY • 3 VEHICLES DETECTED • AUTHORIZED PASS',
       hudOverlay: {
-        type: 'zone',
-        coords: { top: '24%', left: '32%', width: '38%', height: '52%' },
-        label: 'SECTOR 8 DEMARCATION • MONITORED',
-        sublabel: 'Optical Flow: Static • Perimeter Intact',
-        severity: 'secure',
+        type: 'anpr',
+        coords: { top: '56%', left: '15%', width: '38%', height: '38%' },
+        label: 'TACTICAL CONVOY LEAD • DEFENSE TRANSPORT',
+        sublabel: 'Convoy Unit 01 • Checkpoint Cleared',
+        severity: 'authorized',
       },
     },
   ];
@@ -156,7 +156,6 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
               <a href="#pipeline-flow" className="nav-link">Architecture</a>
               <a href="#platform-cards" className="nav-link">Platform Modules</a>
               <a href="#capabilities-matrix" className="nav-link">Capabilities</a>
-              <a href="#command-testimony" className="nav-link">Operational Impact</a>
               <a href="#faq" className="nav-link">FAQ</a>
             </div>
 
@@ -188,7 +187,6 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
               <a href="#pipeline-flow" className="nav-link">Architecture</a>
               <a href="#platform-cards" className="nav-link">Platform Modules</a>
               <a href="#capabilities-matrix" className="nav-link">Capabilities</a>
-              <a href="#command-testimony" className="nav-link">Operational Impact</a>
               <a href="#faq" className="nav-link">FAQ</a>
             </div>
 
@@ -270,7 +268,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
               </div>
               <div className="mockup-media">
                 <img
-                  src="/images/real_border_perimeter_cctv.jpg"
+                  src="/images/border_sentry_road_patrol.jpg"
                   alt="Authentic Military Border Perimeter CCTV Stream"
                   className="mockup-img"
                 />
@@ -280,7 +278,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
                     <span className="hud-time">FPS: 29.8 | YOLOV8 + YUNET ACTIVE</span>
                   </div>
                   <div className="hud-target-box">
-                    <span className="hud-target-tag">PERIMETER WIRE & TRACK SECURE</span>
+                    <span className="hud-target-tag">PERIMETER WIRE & PATROL TRACK SECURE</span>
                   </div>
                   <div className="hud-corner bottom-right">
                     <span>STATUS: OPERATIONAL (LOCAL EDGE)</span>
@@ -321,8 +319,8 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
                 }}
               >
                 {sc.id === 'perimeter-intrusion' && <ShieldAlert size={14} />}
-                {sc.id === 'military-anpr' && <Car size={14} />}
-                {sc.id === 'border-perimeter' && <Eye size={14} />}
+                {sc.id === 'bsf-patrol' && <UserCheck size={14} />}
+                {sc.id === 'military-convoy' && <Car size={14} />}
                 <span>{sc.title}</span>
               </button>
             ))}
@@ -895,39 +893,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
         </div>
       </section>
 
-      {/* ========================================================================= */}
-      {/* 8. COMMAND CENTER TESTIMONIAL / OPERATIONAL PROOF (Image 1 BriefCam)       */}
-      {/* ========================================================================= */}
-      <section id="command-testimony" className="section-testimony">
-        <div className="section-container">
-          <div className="testimony-card">
-            <div className="testimony-image-side">
-              <img
-                src="/images/defense_command_center.jpg"
-                alt="Border Security Tactical Command Room"
-                className="testimony-img"
-              />
-              <div className="testimony-img-tag">DIRECTORATE OF BORDER SURVEILLANCE</div>
-            </div>
-            <div className="testimony-content-side">
-              <div className="testimony-quote-mark">“</div>
-              <blockquote className="testimony-quote">
-                We have seen an <strong>85% reduction in perimeter incident verification times</strong> across our monitored sectors.
-                The automated military vehicle ANPR and biometric access verification relieves round-the-clock operator fatigue,
-                allowing sentries to focus strictly on genuine intrusion alarms.
-              </blockquote>
-              <div className="testimony-author-block">
-                <div className="author-name">Deputy Commandant, Border Technology Division</div>
-                <div className="author-role">Frontier Defense & Perimeter Security Taskforce</div>
-              </div>
-              <button className="testimony-action-btn" onClick={onLaunchCommandCenter}>
-                <span>Launch Operational Command Center</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+
 
       {/* ========================================================================= */}
       {/* 9. FREQUENTLY ASKED QUESTIONS ACCORDION (Image 1 BriefCam)                */}
