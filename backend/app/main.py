@@ -25,7 +25,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import cv2
 import numpy as np
 
@@ -63,6 +63,8 @@ try:
         sign_event_block,
         start_event_retention_daemon,
         verify_chain_integrity,
+        get_escalation_config,
+        update_escalation_config,
     )
     from backend.app.auth import (
         authenticate_user,
@@ -110,6 +112,8 @@ except ImportError:
         sign_event_block,
         start_event_retention_daemon,
         verify_chain_integrity,
+        get_escalation_config,
+        update_escalation_config,
     )
     from auth import (
         authenticate_user,
@@ -165,13 +169,36 @@ def get_active_face_recognizer(reload: bool = False):
             return None
 
 
+_webcam_plate_voter = None
+
+def get_webcam_plate_voter():
+    global _webcam_plate_voter
+    if _webcam_plate_voter is None:
+        try:
+            from backend.app.detection_tracking import MultiFramePlateVoter
+        except ImportError:
+            try:
+                from detection_tracking import MultiFramePlateVoter
+            except ImportError:
+                return None
+        _webcam_plate_voter = MultiFramePlateVoter(history_len=12, min_consensus_votes=2)
+    return _webcam_plate_voter
+
 def run_vehicle_anpr(frame: np.ndarray, bbox: tuple, tracker_id: Optional[int] = None):
-    """Run ANPR plate reading & check authorized vehicles for client webcam frames."""
+    """Run ANPR plate reading with multi-frame consensus & Indian format validation for client webcam frames."""
     try:
-        from backend.app.detection_tracking import detect_and_read_license_plate, get_or_create_easyocr_reader
+        from backend.app.detection_tracking import (
+            detect_and_read_license_plate,
+            get_or_create_easyocr_reader,
+            validate_indian_plate_grammar,
+        )
     except ImportError:
         try:
-            from detection_tracking import detect_and_read_license_plate, get_or_create_easyocr_reader
+            from detection_tracking import (
+                detect_and_read_license_plate,
+                get_or_create_easyocr_reader,
+                validate_indian_plate_grammar,
+            )
         except ImportError:
             return None, None, 0.0, False, None
     try:
@@ -186,6 +213,24 @@ def run_vehicle_anpr(frame: np.ndarray, bbox: tuple, tracker_id: Optional[int] =
     p_bbox, p_text, p_conf = detect_and_read_license_plate(frame, bbox, reader, tracker_id=tracker_id)
     is_auth = False
     owner = None
+
+    # Temporal multi-frame voting consensus across frames
+    voter = get_webcam_plate_voter()
+    t_id = tracker_id if tracker_id is not None else 1
+    if voter and p_text:
+        auth_rec = check_authorized_vehicle(p_text)
+        voted = voter.add_observation(
+            tracker_id=t_id,
+            plate_text=p_text,
+            confidence=p_conf,
+            plate_bbox=p_bbox,
+            frame_idx=0,
+            is_auth=(auth_rec is not None),
+        )
+        p_bbox = voted.get("plate_bbox") or p_bbox
+        p_text = voted.get("plate_number") or p_text
+        p_conf = voted.get("confidence", p_conf)
+
     if p_text:
         auth_rec = check_authorized_vehicle(p_text)
         if auth_rec:
@@ -207,6 +252,14 @@ class VehicleCreateRequest(BaseModel):
     purpose: str = "Official Duty"
     expiry_date: Optional[str] = None
     notes: Optional[str] = None
+
+
+class EscalationConfigRequest(BaseModel):
+    siren_webhook_url: Optional[str] = None
+    sms_webhook_url: Optional[str] = None
+    min_severity: Optional[str] = None
+    enabled: Optional[bool] = None
+
 
 app = FastAPI(
     title="IBVAP - Intelligent Border Video Analytics Platform",
@@ -575,6 +628,24 @@ def get_auth_config():
         "auth_disabled": is_auth_disabled(),
         "status": "active",
     }
+
+
+@app.get("/api/config/escalation")
+def get_escalation_settings(current_user: dict = Depends(get_current_user_flexible)):
+    """Retrieve current siren and SMS escalation channel configuration (Item 25)."""
+    return get_escalation_config()
+
+
+@app.post("/api/config/escalation")
+def update_escalation_settings(
+    req: EscalationConfigRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Update siren and SMS escalation channel endpoints and threshold (Item 25 - Admin only)."""
+    updates = req.dict(exclude_unset=True)
+    updated = update_escalation_config(updates)
+    return {"status": "success", "config": updated}
+
 
 
 @app.post("/api/auth/login")
@@ -1477,6 +1548,7 @@ class ClientFrameRequest(BaseModel):
     image: str  # Base64 data URL
     camera_id: Optional[str] = "CAM_01"
     show_zone: Optional[bool] = True
+    custom_polygon: Optional[List[List[float]]] = None  # Normalized [[x,y],...] or pixel coords (Item 11)
 
 
 _CLIENT_YOLO_MODEL = None
@@ -1512,6 +1584,35 @@ def get_client_yolo_model():
     return _CLIENT_YOLO_MODEL if _CLIENT_YOLO_MODEL is not False else None
 
 
+# Track identity memory cache for client browser webcam AI loop (smooths face recognition across frames)
+_CLIENT_TRACK_IDENTITIES: Dict[int, Dict[str, Any]] = {}
+_CLIENT_TRACK_UNKNOWN_FRAMES: Dict[int, int] = {}
+
+
+def is_person_authorized(name: Optional[str]) -> bool:
+    """Evaluate whether an identified name belongs to an active authorized officer / personnel."""
+    if not name or not isinstance(name, str) or name.upper() in ("UNKNOWN", "NONE", "UNLISTED"):
+        return False
+    try:
+        from backend.app.admin_management import check_watchlist_person_active, get_watchlist_person
+    except ImportError:
+        try:
+            from admin_management import check_watchlist_person_active, get_watchlist_person
+        except ImportError:
+            check_watchlist_person_active = None
+            get_watchlist_person = None
+
+    clean_name = name.strip()
+    if get_watchlist_person:
+        p = get_watchlist_person(clean_name)
+        if p and not p.get("is_expired", False):
+            return True
+    if check_watchlist_person_active:
+        return check_watchlist_person_active(clean_name)
+    return False
+
+
+
 @app.post("/api/stream/process-client-frame")
 async def process_client_frame(
     req: ClientFrameRequest,
@@ -1534,10 +1635,28 @@ async def process_client_frame(
         raise HTTPException(status_code=400, detail=f"Invalid frame data: {str(e)}")
 
     height, width = frame.shape[:2]
-    # Dedicated side perimeter corridor for webcam mode so sitting at desk does not trigger false alerts
-    # Corridor covers right 35% of the frame: [[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]]
-    webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
-    polygon = (webcam_poly * [width, height]).astype(np.int32)
+    # Virtual Fence Polygon: If custom polygon is drawn and provided by client, use it; otherwise fallback to default side corridor
+    if req.custom_polygon and len(req.custom_polygon) >= 3:
+        try:
+            poly_pts = []
+            norm_pts = []
+            for pt in req.custom_polygon:
+                nx = float(pt[0]) if float(pt[0]) <= 1.0 else float(pt[0]) / width
+                ny = float(pt[1]) if float(pt[1]) <= 1.0 else float(pt[1]) / height
+                poly_pts.append([nx * width, ny * height])
+                norm_pts.append([nx, ny])
+            polygon = np.array(poly_pts, dtype=np.int32)
+            active_poly_norm = norm_pts
+        except Exception:
+            webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
+            polygon = (webcam_poly * [width, height]).astype(np.int32)
+            active_poly_norm = webcam_poly.tolist()
+    else:
+        # Dedicated side perimeter corridor for webcam mode so sitting at desk does not trigger false alerts
+        # Corridor covers right 35% of the frame: [[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]]
+        webcam_poly = np.array([[0.62, 0.12], [0.96, 0.12], [0.96, 0.88], [0.62, 0.88]], dtype=np.float32)
+        polygon = (webcam_poly * [width, height]).astype(np.int32)
+        active_poly_norm = webcam_poly.tolist()
 
     model = get_client_yolo_model()
     detections = []
@@ -1590,13 +1709,43 @@ async def process_client_frame(
                     plate_conf = 0.0
                     plate_bbox = None
 
-                    if cls_name == "person" and recognizer is not None:
-                        try:
-                            identified_as, face_conf, face_bbox = recognizer.identify_face_in_person_crop(
-                                frame, (x1, y1, x2, y2)
-                            )
-                        except Exception:
-                            pass
+                    is_auth_person = False
+                    if cls_name == "person":
+                        if recognizer is not None:
+                            try:
+                                f_ident, f_conf, f_coords = recognizer.identify_face_in_person_crop(
+                                    frame, (x1, y1, x2, y2)
+                                )
+                                if f_coords:
+                                    face_bbox = f_coords
+                                if f_ident and f_ident != "UNKNOWN":
+                                    identified_as = f_ident
+                                    face_conf = f_conf
+                                    is_auth_person = is_person_authorized(f_ident)
+                                    _CLIENT_TRACK_IDENTITIES[track_id] = {
+                                        "identity": f_ident,
+                                        "is_authorized": is_auth_person,
+                                        "last_seen": t0,
+                                        "face_conf": f_conf,
+                                        "face_bbox": f_coords,
+                                    }
+                                    _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = 0
+                                elif f_ident == "UNKNOWN":
+                                    _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) + 1
+                            except Exception:
+                                pass
+
+                        # Temporal Track Identity Smoothing:
+                        # If face is momentarily occluded or angled away in this frame, retain positive identification
+                        cached_ident = _CLIENT_TRACK_IDENTITIES.get(track_id)
+                        if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 20.0):
+                            identified_as = cached_ident["identity"]
+                            face_conf = cached_ident.get("face_conf", face_conf)
+                            is_auth_person = cached_ident.get("is_authorized", False)
+                            if not face_bbox:
+                                face_bbox = cached_ident.get("face_bbox")
+                        elif identified_as:
+                            is_auth_person = is_person_authorized(identified_as)
                     elif cls_name in ["car", "bus", "truck", "motorcycle", "vehicle"]:
                         try:
                             p_bbox, p_text, p_conf, is_auth, owner = run_vehicle_anpr(
@@ -1631,14 +1780,21 @@ async def process_client_frame(
                         "plate_confidence": round(plate_conf, 2) if plate_conf else None,
                         "plate_bbox": plate_bbox,
                         "is_authorized_vehicle": is_auth_veh,
+                        "is_authorized_person": is_auth_person,
+                        "is_authorized": is_auth_person or is_auth_veh,
                         "vehicle_owner": veh_owner,
                     })
         except Exception as det_err:
             print(f"[!] Warning running client YOLO detection: {det_err}")
 
     # Check for unknown persons or unauthorized vehicles
+    # Only flag unknown person if NOT authorized AND persistently unverified across multiple frames
     has_unknown_person = any(
-        d["class_name"] == "person" and (not d.get("identified_as") or d.get("identified_as") == "UNKNOWN")
+        d["class_name"] == "person"
+        and not d.get("is_authorized_person")
+        and not d.get("is_authorized")
+        and (not d.get("identified_as") or d.get("identified_as") == "UNKNOWN")
+        and (d.get("in_zone") or _CLIENT_TRACK_UNKNOWN_FRAMES.get(d["track_id"], 0) >= 6)
         for d in detections
     )
     has_unknown_vehicle = any(
@@ -1647,10 +1803,10 @@ async def process_client_frame(
     )
     has_unknown_activity = has_unknown_person or has_unknown_vehicle
 
-    # Enqueue intrusion event with rate limiting (at most once every 3.5 seconds)
+    # Enqueue intrusion event with rate limiting (at most once every 4.0 seconds)
     now = time.time()
     last_logged = _LAST_CLIENT_INTRUSION_LOG.get(req.camera_id, 0)
-    if (has_intrusion or has_unknown_activity) and (now - last_logged >= 3.5):
+    if (has_intrusion or has_unknown_activity) and (now - last_logged >= 4.0):
         _LAST_CLIENT_INTRUSION_LOG[req.camera_id] = now
         try:
             from backend.app.events import log_event_async
@@ -1661,7 +1817,7 @@ async def process_client_frame(
                 log_event_async = None
         if log_event_async:
             primary_det = next(
-                (d for d in detections if (d["class_name"] == "person" and not d.get("identified_as")) or (d["class_name"] in ["car", "bus", "truck", "motorcycle", "vehicle"] and not d.get("is_authorized_vehicle")) or d.get("in_zone")),
+                (d for d in detections if (d["class_name"] == "person" and not d.get("is_authorized_person")) or (d["class_name"] in ["car", "bus", "truck", "motorcycle", "vehicle"] and not d.get("is_authorized_vehicle")) or d.get("in_zone")),
                 detections[0] if detections else None,
             )
             det_class = primary_det["class_name"] if primary_det else "person"
@@ -1670,7 +1826,15 @@ async def process_client_frame(
             det_conf = primary_det["confidence"] if primary_det else 0.85
             ident = primary_det.get("vehicle_owner") if primary_det.get("is_authorized_vehicle") else primary_det.get("identified_as")
 
-            evt_type = "unauthorized_vehicle" if det_class in ["car", "bus", "truck", "motorcycle", "vehicle"] and not primary_det.get("is_authorized_vehicle") else ("unauthorized_person" if not ident else "zone_entry")
+            if det_class in ["car", "bus", "truck", "motorcycle", "vehicle"]:
+                evt_type = "authorized_entry" if primary_det.get("is_authorized_vehicle") else "unauthorized_vehicle"
+            else:
+                if primary_det.get("is_authorized_person"):
+                    evt_type = "authorized_entry" if primary_det.get("in_zone") else "authorized_person"
+                elif ident and ident != "UNKNOWN":
+                    evt_type = "zone_entry" if primary_det.get("in_zone") else "watchlist_match"
+                else:
+                    evt_type = "unauthorized_person"
 
             log_event_async(
                 camera_id=req.camera_id,
@@ -1709,7 +1873,7 @@ async def process_client_frame(
         "camera_id": req.camera_id,
         "width": width,
         "height": height,
-        "polygon": webcam_poly.tolist(),
+        "polygon": active_poly_norm,
         "detections": detections,
         "has_intrusion": has_intrusion,
         "has_unknown_person": has_unknown_person,
@@ -1749,6 +1913,49 @@ def get_available_videos():
             "size_kb": round(file.stat().st_size / 1024),
         })
     return {"videos": videos}
+
+
+@app.post("/api/video/upload")
+async def upload_offline_video(
+    file: UploadFile = File(..., description="Video file for offline forensic analysis"),
+    current_user: dict = Depends(get_current_user_flexible),
+):
+    """
+    Upload an offline surveillance or test video file (MP4/AVI/MKV/MOV) directly for immediate ingestion or preview (Item 26).
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="A valid video file is required.")
+
+    ext = Path(file.filename).suffix.lower()
+    allowed_exts = [".mp4", ".avi", ".mkv", ".mov", ".m4v", ".webm"]
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported video format '{ext}'. Supported formats: {', '.join(allowed_exts)}",
+        )
+
+    clean_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', Path(file.filename).stem)
+    dest_filename = f"upload_{clean_stem}_{int(time.time())}{ext}"
+    app_dir = Path(__file__).resolve().parent
+    test_videos_dir = app_dir.parent / "test_videos"
+    test_videos_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = test_videos_dir / dest_filename
+
+    contents = await file.read()
+    if len(contents) < 100:
+        raise HTTPException(status_code=400, detail="Uploaded video file is empty or corrupted.")
+
+    dest_path.write_bytes(contents)
+    size_kb = round(len(contents) / 1024)
+
+    return {
+        "status": "success",
+        "filename": dest_filename,
+        "label": f"Offline Video: {file.filename} ({size_kb} KB)",
+        "size_kb": size_kb,
+        "message": f"Successfully uploaded {file.filename} for offline video inspection.",
+    }
+
 
 
 @app.post("/api/stream/start")

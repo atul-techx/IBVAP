@@ -10,11 +10,23 @@ export function AuthProvider({ children }) {
   const [authDisabled, setAuthDisabled] = useState(false);
   const [authError, setAuthError] = useState(null);
 
-  // Check system authentication configuration on mount
+  // Check system authentication configuration on mount & restore session
   useEffect(() => {
     let isMounted = true;
     async function checkConfig() {
       try {
+        // Restore session from sessionStorage if present
+        const savedToken = sessionStorage.getItem('ibvap_token');
+        const savedUserStr = sessionStorage.getItem('ibvap_user');
+        if (savedToken && savedUserStr) {
+          try {
+            const savedUser = JSON.parse(savedUserStr);
+            setAuthToken(savedToken);
+            setToken(savedToken);
+            setUser(savedUser);
+          } catch (_) {}
+        }
+
         const config = await fetchAuthConfig();
         if (isMounted) {
           if (config.auth_disabled) {
@@ -49,6 +61,10 @@ export function AuthProvider({ children }) {
       setUser(data.user);
       setToken(data.access_token);
       setAuthToken(data.access_token);
+      try {
+        sessionStorage.setItem('ibvap_token', data.access_token);
+        sessionStorage.setItem('ibvap_user', JSON.stringify(data.user));
+      } catch (_) {}
       return data.user;
     } catch (err) {
       setAuthError(err.message || 'Authentication failed');
@@ -61,6 +77,10 @@ export function AuthProvider({ children }) {
     setToken(null);
     setAuthToken(null);
     setAuthError(null);
+    try {
+      sessionStorage.removeItem('ibvap_token');
+      sessionStorage.removeItem('ibvap_user');
+    } catch (_) {}
   };
 
   const value = {

@@ -19,13 +19,14 @@ Features:
 import argparse
 import math
 import os
+import re
 import sys
 import tempfile
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -96,6 +97,8 @@ except ImportError:
         check_authorized_vehicle = lambda plate, db_path=None: None
         WatchlistFaceRecognizer = None
         get_watchlist_recognizer = lambda reload=False: None
+
+_module_log_event_async = log_event_async
 
 try:
     from backend.app.weather_enhancement import (
@@ -278,7 +281,7 @@ class AppearanceReIdentifier:
                 else:
                     rec["appearance_hist"] = cur_hist
 
-# Target classes to detect and track (COCO class mappings)
+# Target security classes to detect and track (COCO class mappings)
 TARGET_CLASSES = {
     "person": 0,
     "bicycle": 1,
@@ -287,8 +290,24 @@ TARGET_CLASSES = {
     "bus": 5,
     "truck": 7,
 }
-TARGET_CLASS_IDS = list(TARGET_CLASSES.values())
-TARGET_CLASS_NAMES = list(TARGET_CLASSES.keys())
+
+# Wildlife & Stray Animal Classes (Item 15 - False Positive Filtering)
+WILDLIFE_CLASSES = {
+    "bird": 14,
+    "cat": 15,
+    "dog": 16,
+    "horse": 17,
+    "sheep": 18,
+    "cow": 19,
+    "elephant": 20,
+    "bear": 21,
+    "zebra": 22,
+    "giraffe": 23,
+}
+
+ALL_TRACKED_CLASSES = {**TARGET_CLASSES, **WILDLIFE_CLASSES}
+TARGET_CLASS_IDS = list(ALL_TRACKED_CLASSES.values())
+TARGET_CLASS_NAMES = list(ALL_TRACKED_CLASSES.keys())
 
 # Default restricted border polygon (normalized coordinates [0.0 - 1.0] for resolution independence)
 DEFAULT_NORMALIZED_POLYGON = np.array(
@@ -423,6 +442,285 @@ def match_authorized_plate_fuzzy(candidate_str: Optional[str], db_path: Optional
     return None
 
 
+INDIAN_STATE_UT_CODES = {
+    "AN", "AP", "AR", "AS", "BR", "CG", "CH", "DD", "DL", "DN", "GA", "GJ",
+    "HP", "HR", "JH", "JK", "KA", "KL", "LA", "LD", "MH", "ML", "MN", "MP",
+    "MZ", "NL", "OD", "OR", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UK",
+    "UA", "UP", "WB"
+}
+
+
+def validate_indian_plate_grammar(plate_str: Optional[str]) -> Dict[str, Any]:
+    """
+    Validates whether an alphanumeric plate candidate adheres to official Indian
+    Motor Vehicles Act registration formats:
+    
+    1. Standard State/UT Format:
+       - 2 letters: Valid State/UT Code (e.g. DL, UP, MH, HR, JK, PB, KA...)
+       - 1 or 2 digits: RTO district code (e.g. 01, 14, 9)
+       - 0 to 3 letters: Series code (e.g. AB, C, XYZ)
+       - 4 digits: Unique registration number (e.g. 1234, 0001)
+       Pattern: ^([A-Z]{2})([0-9]{1,2})([A-Z]{0,3})([0-9]{4})$
+       
+    2. Bharat Series (BH Series, pan-India defense & transferable personnel):
+       - 2 digits: Year of registration (e.g. 21, 22, 23, 24)
+       - BH: Fixed letters
+       - 4 digits: Registration number
+       - 1 or 2 letters: Series (e.g. AA, B)
+       Pattern: ^([0-9]{2})BH([0-9]{4})([A-Z]{1,2})$
+       
+    3. Military / Defense Registration Format:
+       - 2 digits year, letter base, 5-6 digits, optional suffix
+       Pattern: ^([0-9]{2})([A-Z])([0-9]{5,6})([A-Z]?)$
+       
+    4. Diplomatic / Foreign Mission Format:
+       - 1-3 digits + CD / CC / UN + 1-4 digits
+       Pattern: ^([0-9]{1,3})(CD|CC|UN)([0-9]{1,4})$
+       
+    Returns dict:
+    {
+        "is_valid": bool,
+        "format_type": "standard_state" | "bharat_series" | "defense" | "diplomatic" | "non_conforming",
+        "state_code": Optional[str],
+        "state_valid": bool,
+        "normalized": str,
+        "formatted": str,
+        "confidence_multiplier": float
+    }
+    """
+    if not plate_str or not isinstance(plate_str, str):
+        return {
+            "is_valid": False,
+            "format_type": "non_conforming",
+            "state_code": None,
+            "state_valid": False,
+            "normalized": "",
+            "formatted": "",
+            "confidence_multiplier": 0.5,
+        }
+
+    clean = re.sub(r"[^A-Z0-9]", "", plate_str.upper())
+    if not clean:
+        return {
+            "is_valid": False,
+            "format_type": "non_conforming",
+            "state_code": None,
+            "state_valid": False,
+            "normalized": "",
+            "formatted": "",
+            "confidence_multiplier": 0.5,
+        }
+
+    # 1. Bharat Series (BH)
+    bh_match = re.match(r"^([0-9]{2})BH([0-9]{4})([A-Z]{1,2})$", clean)
+    if bh_match:
+        yr, num, series = bh_match.groups()
+        return {
+            "is_valid": True,
+            "format_type": "bharat_series",
+            "state_code": "BH",
+            "state_valid": True,
+            "normalized": clean,
+            "formatted": f"{yr} BH {num} {series}",
+            "confidence_multiplier": 1.35,
+        }
+
+    # 2. Standard State / UT Format
+    std_match = re.match(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{0,3})([0-9]{4})$", clean)
+    if std_match:
+        st, rto, series, num = std_match.groups()
+        is_known_state = st in INDIAN_STATE_UT_CODES
+        formatted = f"{st} {rto.zfill(2)}"
+        if series:
+            formatted += f" {series}"
+        formatted += f" {num}"
+        return {
+            "is_valid": is_known_state,
+            "format_type": "standard_state",
+            "state_code": st,
+            "state_valid": is_known_state,
+            "normalized": clean,
+            "formatted": formatted,
+            "confidence_multiplier": 1.4 if is_known_state else 0.9,
+        }
+
+    # 3. Defense / Military
+    def_match = re.match(r"^([0-9]{2})([A-Z])([0-9]{4,6})([A-Z]?)$", clean)
+    if def_match:
+        yr, cls_letter, num, sfx = def_match.groups()
+        formatted = f"{yr} {cls_letter} {num}"
+        if sfx:
+            formatted += f" {sfx}"
+        return {
+            "is_valid": True,
+            "format_type": "defense",
+            "state_code": "DEF",
+            "state_valid": True,
+            "normalized": clean,
+            "formatted": formatted,
+            "confidence_multiplier": 1.3,
+        }
+
+    # 4. Diplomatic (CD / CC / UN)
+    dip_match = re.match(r"^([0-9]{1,3})(CD|CC|UN)([0-9]{1,4})$", clean)
+    if dip_match:
+        pfx, body, num = dip_match.groups()
+        return {
+            "is_valid": True,
+            "format_type": "diplomatic",
+            "state_code": body,
+            "state_valid": True,
+            "normalized": clean,
+            "formatted": f"{pfx} {body} {num}",
+            "confidence_multiplier": 1.25,
+        }
+
+    return {
+        "is_valid": False,
+        "format_type": "non_conforming",
+        "state_code": clean[:2] if len(clean) >= 2 and clean[:2].isalpha() else None,
+        "state_valid": False,
+        "normalized": clean,
+        "formatted": format_plate_string(clean),
+        "confidence_multiplier": 0.7,
+    }
+
+
+class MultiFramePlateVoter:
+    """
+    Temporal multi-frame voting consensus engine for ANPR (SIH PS 26187 Item 4).
+    Accumulates OCR candidate readings per tracked vehicle across consecutive frames
+    to eliminate single-frame OCR noise, motion blur, and specular glare.
+    
+    A plate hypothesis is confirmed when:
+    1. An authorized whitelist match is encountered (immediate confirmation), OR
+    2. >= min_consensus_votes produce agreeing plate strings with valid Indian grammar, OR
+    3. Weighted voting score exceeds the confirmation threshold.
+    """
+    def __init__(self, history_len: int = 15, min_consensus_votes: int = 2):
+        self.history_len = history_len
+        self.min_consensus_votes = min_consensus_votes
+        # tracker_id -> deque of observations
+        self.track_votes: Dict[int, deque] = {}
+        # tracker_id -> confirmed plate dictionary
+        self.confirmed_plates: Dict[int, Dict[str, Any]] = {}
+
+    def add_observation(
+        self,
+        tracker_id: int,
+        plate_text: Optional[str],
+        confidence: float,
+        plate_bbox: Optional[List[float]],
+        frame_idx: int,
+        is_auth: bool = False,
+    ) -> Dict[str, Any]:
+        if tracker_id not in self.track_votes:
+            self.track_votes[tracker_id] = deque(maxlen=self.history_len)
+
+        grammar = validate_indian_plate_grammar(plate_text) if plate_text else {}
+
+        if plate_text:
+            clean_norm = re.sub(r"[^A-Z0-9]", "", plate_text.upper())
+            self.track_votes[tracker_id].append({
+                "plate": plate_text,
+                "clean": clean_norm,
+                "conf": float(confidence),
+                "frame_idx": frame_idx,
+                "grammar": grammar,
+                "bbox": plate_bbox,
+                "is_auth": is_auth,
+            })
+
+        # If already confirmed, update consensus count and bbox
+        if tracker_id in self.confirmed_plates and self.confirmed_plates[tracker_id].get("is_confirmed"):
+            curr = self.confirmed_plates[tracker_id]
+            if plate_bbox:
+                curr["plate_bbox"] = plate_bbox
+            conf_clean = re.sub(r"[^A-Z0-9]", "", str(curr.get("plate_number", "")).upper())
+            curr["consensus_count"] = sum(1 for obs in self.track_votes[tracker_id] if obs.get("clean") == conf_clean)
+            return curr
+
+        obs_list = list(self.track_votes[tracker_id])
+        if not obs_list:
+            return {
+                "plate_number": plate_text,
+                "plate_bbox": plate_bbox,
+                "confidence": confidence,
+                "is_confirmed": False,
+                "consensus_count": 0,
+                "grammar": grammar,
+            }
+
+        # Weighted voting by candidate normalized string
+        candidate_scores: Dict[str, float] = {}
+        candidate_counts: Dict[str, int] = {}
+        candidate_rep: Dict[str, Dict[str, Any]] = {}
+
+        for obs in obs_list:
+            c = obs["clean"]
+            if not c:
+                continue
+            weight = obs["conf"] * obs["grammar"].get("confidence_multiplier", 1.0)
+            if obs["is_auth"]:
+                weight *= 2.5
+            candidate_scores[c] = candidate_scores.get(c, 0.0) + weight
+            candidate_counts[c] = candidate_counts.get(c, 0) + 1
+            if c not in candidate_rep or obs["conf"] > candidate_rep[c]["conf"]:
+                candidate_rep[c] = obs
+
+        if not candidate_scores:
+            return {
+                "plate_number": plate_text,
+                "plate_bbox": plate_bbox,
+                "confidence": confidence,
+                "is_confirmed": False,
+                "consensus_count": 0,
+                "grammar": grammar,
+            }
+
+        best_clean = max(candidate_scores, key=candidate_scores.get)
+        best_rep = candidate_rep[best_clean]
+        best_count = candidate_counts[best_clean]
+        best_grammar = best_rep["grammar"]
+        formatted_plate = best_grammar.get("formatted") or best_rep["plate"]
+
+        is_confirmed = False
+        if best_rep["is_auth"]:
+            is_confirmed = True
+        elif best_count >= self.min_consensus_votes and best_grammar.get("is_valid", False):
+            is_confirmed = True
+        elif best_count >= 3:
+            is_confirmed = True
+        elif best_rep["conf"] >= 0.88 and best_grammar.get("is_valid", False):
+            is_confirmed = True
+
+        result = {
+            "plate_number": formatted_plate,
+            "plate_bbox": best_rep["bbox"] or plate_bbox,
+            "confidence": min(0.99, round(best_rep["conf"] * (1.15 if best_count > 1 else 1.0), 3)),
+            "is_confirmed": is_confirmed,
+            "consensus_count": best_count,
+            "grammar": best_grammar,
+        }
+
+        if is_confirmed:
+            self.confirmed_plates[tracker_id] = result
+
+        return result
+
+    def get_plate(self, tracker_id: int) -> Optional[Dict[str, Any]]:
+        return self.confirmed_plates.get(tracker_id)
+
+    def prune(self, current_frame_idx: int, max_idle_frames: int = 150):
+        to_del = []
+        for tid, votes in self.track_votes.items():
+            if votes and (current_frame_idx - votes[-1]["frame_idx"]) > max_idle_frames:
+                to_del.append(tid)
+        for tid in to_del:
+            self.track_votes.pop(tid, None)
+            self.confirmed_plates.pop(tid, None)
+
+
 def detect_and_read_license_plate(
     frame: np.ndarray,
     vehicle_bbox: Tuple[int, int, int, int],
@@ -541,6 +839,10 @@ def detect_and_read_license_plate(
                     auth_v = match_authorized_plate_fuzzy(formatted_p, db_path=db_path)
                     if auth_v:
                         return plate_coords, auth_v.get("plate_number", formatted_p), 0.96
+                    grammar_res = validate_indian_plate_grammar(formatted_p)
+                    if grammar_res.get("is_valid"):
+                        formatted_p = grammar_res.get("formatted", formatted_p)
+                        max_conf = min(0.99, max_conf * grammar_res.get("confidence_multiplier", 1.0))
                     return plate_coords, formatted_p, round(max_conf, 3)
 
         # Fallback plate extraction for demo & unauthorized vehicles
@@ -681,10 +983,131 @@ class SuspiciousBehaviorDetector:
                         if st["active_behavior"] == "PACING":
                             st["active_behavior"] = None
 
+        # 3. Check One-Way / Wrong-Direction Traversal Anomaly (Item 13)
+        if hasattr(self, "authorized_flow_direction") and self.authorized_flow_direction is not None and len(history) >= 15:
+            pt_now = history[-1]
+            pt_past = history[-15]
+            dx = float(pt_now[1] - pt_past[1])
+            dy = float(pt_now[2] - pt_past[2])
+            dist_disp = math.hypot(dx, dy)
+            if dist_disp >= 35.0:
+                adx, ady = self.authorized_flow_direction
+                norm_ad = math.hypot(adx, ady)
+                if norm_ad > 0:
+                    dot = (dx * adx + dy * ady) / (dist_disp * norm_ad)
+                    if dot < -0.55:
+                        st["active_behavior"] = "WRONG_WAY"
+                        if (not st.get("wrong_way_alerted", False)) or (frame_idx - st.get("wrong_way_alert_frame", -999) >= 90):
+                            st["wrong_way_alerted"] = True
+                            st["wrong_way_alert_frame"] = frame_idx
+                            triggered_events.append("wrong_way_direction")
+                    elif dot > 0.2:
+                        st["wrong_way_alerted"] = False
+
         return triggered_events
+
+    def is_foliage_or_wind(self, tracker_id: int) -> bool:
+        """
+        Foliage / Wind False-Positive Filter (SIH PS 26187 Item 16):
+        Detects if a track exhibits high-frequency spatial oscillation around a stationary anchor
+        (typical of wind-blown branches/bushes) with negligible net displacement over 25+ frames.
+        """
+        hist = self.position_histories.get(tracker_id)
+        if not hist or len(hist) < 25:
+            return False
+        pts = list(hist)[-25:]
+        xs = [p[1] for p in pts]
+        ys = [p[2] for p in pts]
+        disp = math.hypot(xs[-1] - xs[0], ys[-1] - ys[0])
+        spread = max(xs) - min(xs) + max(ys) - min(ys)
+        if disp < 18.0 and spread < 35.0:
+            dxs = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+            crossings = sum(1 for i in range(len(dxs) - 1) if (dxs[i] > 0 and dxs[i + 1] < 0) or (dxs[i] < 0 and dxs[i + 1] > 0))
+            if crossings >= 6:
+                return True
+        return False
 
     def get_active_behavior(self, tracker_id: int) -> str | None:
         return self.alert_states.get(tracker_id, {}).get("active_behavior")
+
+
+class OpticalTamperDetector:
+    """
+    Real-Time Optical Camera Tampering Detection Engine (SIH PS 26187 Item 17).
+    Detects 3 core sabotage / failure vectors:
+    1. Lens Occlusion / Spray / Covered: Screen plunged into pitch darkness or flat uniform color.
+    2. Blinding / Laser / Directed High-Beam: Extreme saturation over-exposure across sensor.
+    3. Abrupt Angle Shift / Camera Turned Away: Massive structural dissimilarity between frames (>85% shift).
+    """
+    def __init__(
+        self,
+        dark_mean_thresh: float = 8.0,
+        dark_std_thresh: float = 6.0,
+        blind_mean_thresh: float = 248.0,
+        blind_std_thresh: float = 8.0,
+        shift_diff_thresh: float = 0.85,
+        alert_cooldown_frames: int = 90,
+    ):
+        self.dark_mean_thresh = dark_mean_thresh
+        self.dark_std_thresh = dark_std_thresh
+        self.blind_mean_thresh = blind_mean_thresh
+        self.blind_std_thresh = blind_std_thresh
+        self.shift_diff_thresh = shift_diff_thresh
+        self.alert_cooldown_frames = alert_cooldown_frames
+        self.last_alert_frame = -999
+        self.prev_small_gray: Optional[np.ndarray] = None
+        self.tamper_frame_count = 0
+        self.current_tamper_state: Optional[str] = None
+
+    def evaluate_frame(self, frame: np.ndarray, frame_idx: int) -> Optional[Dict[str, Any]]:
+        if frame is None or frame.size == 0:
+            return None
+
+        # Fast downsampled luminance check (<0.2ms)
+        small_gray = cv2.cvtColor(
+            cv2.resize(frame, (160, 90), interpolation=cv2.INTER_NEAREST),
+            cv2.COLOR_BGR2GRAY
+        )
+        mean_val, std_val = cv2.meanStdDev(small_gray)
+        mean_lum = float(mean_val[0][0])
+        std_lum = float(std_val[0][0])
+
+        tamper_cause = None
+
+        # Vector 1: Lens Covered / Spray Paint (flat black/dark)
+        if mean_lum < self.dark_mean_thresh and std_lum < self.dark_std_thresh:
+            tamper_cause = "lens_covered_or_occluded"
+        # Vector 2: Camera Blinded / Laser / High Beam (flat white/bright)
+        elif mean_lum > self.blind_mean_thresh and std_lum < self.blind_std_thresh:
+            tamper_cause = "camera_blinded_overexposure"
+        # Vector 3: Abrupt Angle Shift / Camera Turned Away
+        elif self.prev_small_gray is not None:
+            diff = cv2.absdiff(small_gray, self.prev_small_gray)
+            non_zero_ratio = float(np.count_nonzero(diff > 35)) / float(diff.size)
+            if non_zero_ratio > self.shift_diff_thresh:
+                tamper_cause = "camera_angle_shifted_or_displaced"
+
+        self.prev_small_gray = small_gray
+
+        if tamper_cause:
+            self.tamper_frame_count += 1
+            if self.tamper_frame_count >= 3:
+                self.current_tamper_state = tamper_cause
+                if (frame_idx - self.last_alert_frame) >= self.alert_cooldown_frames:
+                    self.last_alert_frame = frame_idx
+                    return {
+                        "is_tampered": True,
+                        "cause": tamper_cause,
+                        "mean_lum": round(mean_lum, 1),
+                        "std_lum": round(std_lum, 1),
+                        "frame_idx": frame_idx,
+                    }
+        else:
+            self.tamper_frame_count = max(0, self.tamper_frame_count - 1)
+            if self.tamper_frame_count == 0:
+                self.current_tamper_state = None
+
+        return None
 
 
 def get_default_paths():
@@ -879,8 +1302,32 @@ class ThreadedLiveStream:
             self.cap.release()
 
 
+def resolve_youtube_stream_url(url: str) -> str:
+    """Resolve a YouTube video/live URL to a direct playable MP4 / HLS stream URL using yt-dlp."""
+    if not isinstance(url, str):
+        return url
+    lower = url.lower()
+    if "youtube.com" in lower or "youtu.be" in lower:
+        try:
+            import yt_dlp
+            ydl_opts = {
+                "format": "best[ext=mp4]/best",
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if "url" in info:
+                    print(f"[+] [UNIVERSAL INGESTION] Resolved YouTube URL to direct stream: {info['url'][:60]}...")
+                    return info["url"]
+        except Exception as e:
+            print(f"[!] Warning: Could not resolve YouTube URL with yt-dlp ({e}). Attempting direct capture...")
+    return url
+
+
 def open_video_capture(source: str | int):
-    """Open OpenCV VideoCapture supporting Webcam index, RTSP/HTTP URL, or file path."""
+    """Open OpenCV VideoCapture supporting Webcam index, RTSP/HTTP URL, YouTube URL, or file path."""
     if isinstance(source, int):
         # On Windows, cv2.CAP_DSHOW provides fast hardware webcam initialization
         cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
@@ -892,10 +1339,13 @@ def open_video_capture(source: str | int):
         except Exception:
             pass
         return cap
-    elif isinstance(source, str) and (source.startswith("rtsp://") or source.startswith("http://") or source.startswith("https://")):
-        # Network RTSP / HTTP IP Camera Stream
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        return cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    elif isinstance(source, str):
+        resolved = resolve_youtube_stream_url(source)
+        if resolved.startswith("rtsp://") or resolved.startswith("http://") or resolved.startswith("https://"):
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            return cv2.VideoCapture(resolved, cv2.CAP_FFMPEG)
+        else:
+            return cv2.VideoCapture(str(resolved))
     else:
         # Standard video file
         return cv2.VideoCapture(str(source))
@@ -922,6 +1372,7 @@ def run_tracking_and_fence(
     weather_dehaze_method: str = "dcp",
     loop: bool = True,
     show_zone: bool = True,
+    suppress_loop_duplicates: bool = True,
 ):
     """Run ByteTrack tracking and polygon virtual fence intrusion detection with live reconnect support, Appearance Re-ID, Night-Mode CLAHE, and Weather-Adaptive Dehazing."""
     is_webcam = isinstance(input_source, int)
@@ -1067,6 +1518,7 @@ def run_tracking_and_fence(
         pacing_min_dist_px=25.0,
         near_zone_distance_px=120.0,
     )
+    tamper_detector = OpticalTamperDetector()
     tracked_states: dict[int, dict] = {}
     track_histories: dict[int, deque] = {}
     total_intrusion_events = 0
@@ -1095,6 +1547,7 @@ def run_tracking_and_fence(
     # ANPR Engine (Lazy-loaded only if vehicle detection occurs to conserve RAM)
     ocr_reader = None
     vehicle_plate_cache: dict[int, dict] = {}
+    plate_voter = MultiFramePlateVoter(history_len=15, min_consensus_votes=2)
 
     frame_idx = 0
     can_display = show_live
@@ -1117,6 +1570,17 @@ def run_tracking_and_fence(
     footfall_in_count = 0
     footfall_out_count = 0
     active_inside_track_ids: set[int] = set()
+
+    # Loop iteration counter & duplicate event suppressor (Item 9)
+    loop_iteration = 0
+    is_weather_mode_active = False
+    is_night_mode_active = False
+
+    def log_event_async(*args, **kwargs):
+        """Suppresses duplicate alert logging when a video file replays in loop mode."""
+        if loop and suppress_loop_duplicates and loop_iteration > 0:
+            return None
+        return _module_log_event_async(*args, **kwargs)
 
     try:
         while True:
@@ -1150,6 +1614,11 @@ def run_tracking_and_fence(
                 else:
                     # Video file ended -> Rewind if loop enabled
                     if loop:
+                        loop_iteration += 1
+                        print(
+                            f"[*] [UNIVERSAL INGESTION] Video playback ended. Rewinding to Loop #{loop_iteration + 1} "
+                            f"(Duplicate event logging: {'SUPPRESSED' if suppress_loop_duplicates else 'ACTIVE'})..."
+                        )
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         ret, frame = cap.read()
                         if not ret or frame is None:
@@ -1191,6 +1660,26 @@ def run_tracking_and_fence(
                 else:
                     is_hazy, haze_score, haze_metrics = compute_fog_haze_metric(frame)
                     is_weather_mode_active = weather_mode and is_hazy
+
+            # Stage 1.5: Optical Camera Tampering Detection (Item 17)
+            if frame_idx % 5 == 0:
+                tamper_alert = tamper_detector.evaluate_frame(frame, frame_idx)
+                if tamper_alert and tamper_alert.get("is_tampered"):
+                    t_cause = tamper_alert["cause"]
+                    print(f"\n[!] [CRITICAL SECURITY ALERT] Camera Tampering Detected on {camera_id}: {t_cause.upper()} @ Frame {frame_idx}")
+                    log_event_async(
+                        camera_id=camera_id,
+                        event_type="camera_tampering",
+                        object_class="camera",
+                        track_id=0,
+                        frame_number=frame_idx,
+                        bbox=[0.0, 0.0, float(width), float(height)],
+                        confidence=0.99,
+                        frame=frame,
+                        db_path=db_path,
+                        print_json=True,
+                        source_video=source_video_tag,
+                    )
 
                 frame_brightness = compute_frame_brightness(frame)
                 is_night_mode_active = night_mode and (frame_brightness < low_light_thresh)
@@ -1376,28 +1865,42 @@ def run_tracking_and_fence(
                     is_auth_veh = False
                     auth_veh_owner = None
                     if cls_name in ["car", "bus", "truck", "motorcycle", "vehicle"]:
+                        confirmed_p = plate_voter.get_plate(tracker_id)
                         cached_p = vehicle_plate_cache.get(tracker_id)
-                        if cached_p and cached_p.get("plate_number") is not None:
-                            plate_bbox = cached_p.get("plate_bbox")
-                            plate_number = cached_p.get("plate_number")
-                            plate_confidence = cached_p.get("plate_confidence")
-                            is_auth_veh = cached_p.get("is_authorized_vehicle", False)
-                            auth_veh_owner = cached_p.get("vehicle_owner")
-                        elif cached_p is None or (frame_idx - cached_p.get("last_checked", 0)) >= 15:
+                        if confirmed_p and confirmed_p.get("is_confirmed"):
+                            plate_bbox = confirmed_p.get("plate_bbox")
+                            plate_number = confirmed_p.get("plate_number")
+                            plate_confidence = confirmed_p.get("confidence")
+                            is_auth_veh = confirmed_p.get("is_authorized_vehicle", False)
+                            auth_veh_owner = confirmed_p.get("vehicle_owner")
+                        elif cached_p is None or (frame_idx - cached_p.get("last_checked", 0)) >= 5:
                             if ocr_reader is None:
                                 ocr_reader = get_or_create_easyocr_reader()
                             p_bbox, p_text, p_conf = detect_and_read_license_plate(
                                 frame, (x1, y1, x2, y2), ocr_reader, db_path=db_path, tracker_id=tracker_id
                             )
-                            plate_bbox = p_bbox
-                            plate_number = p_text
-                            plate_confidence = p_conf
+                            auth_v = match_authorized_plate_fuzzy(p_text, db_path=db_path) if p_text else None
+                            is_auth = auth_v is not None
 
-                            auth_v = match_authorized_plate_fuzzy(plate_number, db_path=db_path) if plate_number else None
+                            voted = plate_voter.add_observation(
+                                tracker_id=tracker_id,
+                                plate_text=p_text,
+                                confidence=p_conf,
+                                plate_bbox=p_bbox,
+                                frame_idx=frame_idx,
+                                is_auth=is_auth,
+                            )
+
+                            plate_bbox = voted.get("plate_bbox") or p_bbox
+                            plate_number = voted.get("plate_number") or p_text
+                            plate_confidence = voted.get("confidence", p_conf)
+
                             if auth_v:
                                 is_auth_veh = True
                                 auth_veh_owner = auth_v.get("owner_name")
                                 plate_number = auth_v.get("plate_number", plate_number)
+                                voted["is_authorized_vehicle"] = True
+                                voted["vehicle_owner"] = auth_veh_owner
                             else:
                                 is_auth_veh = False
                                 auth_veh_owner = None
@@ -1409,6 +1912,7 @@ def run_tracking_and_fence(
                                 "is_authorized_vehicle": is_auth_veh,
                                 "vehicle_owner": auth_veh_owner,
                                 "last_checked": frame_idx,
+                                "is_confirmed": voted.get("is_confirmed", False),
                             }
                         elif cached_p is not None:
                             plate_bbox = cached_p.get("plate_bbox")
@@ -1439,7 +1943,11 @@ def run_tracking_and_fence(
                         and (tracker_id in confirmed_track_identities or (identified_as and identified_as != "UNKNOWN"))
                     )
 
-                    # Evaluate Suspicious Behavioral Anomalies (Loitering & Pacing)
+                    # Check for Wildlife (Item 15) and Foliage/Wind (Item 16) False-Positive Filtering
+                    is_wildlife = cls_name in WILDLIFE_CLASSES
+                    is_foliage = behavior_detector.is_foliage_or_wind(tracker_id) if cls_name == "person" else False
+
+                    # Evaluate Suspicious Behavioral Anomalies (Loitering, Pacing, Wrong-Direction)
                     behavior_events = behavior_detector.update(
                         tracker_id=tracker_id,
                         cls_name=cls_name,
@@ -1448,8 +1956,8 @@ def run_tracking_and_fence(
                         dist_to_zone=dist_to_zone,
                         frame_idx=frame_idx,
                     )
-                    # For authorized personnel, completely suppress suspicious behavior alarms
-                    if not is_person_auth:
+                    # For authorized personnel, wildlife, and foliage, completely suppress behavior alarms
+                    if not is_person_auth and not is_wildlife and not is_foliage:
                         for b_ev in behavior_events:
                             total_intrusion_events += 1
                             log_event_async(
@@ -1514,8 +2022,8 @@ def run_tracking_and_fence(
                                     footfall_in_count += 1
                                     active_inside_track_ids.add(tracker_id)
 
-                                # Only log zone entry alert if detection meets alert confidence threshold
-                                if confidence >= alert_conf_threshold:
+                                # Only log zone entry alert if detection meets alert confidence threshold and is not wildlife/foliage
+                                if confidence >= alert_conf_threshold and not is_wildlife and not is_foliage:
                                     if cls_name == "person":
                                         if tracker_id in confirmed_track_identities:
                                             # Already confirmed as authorized person -> Log Routine Access (LOW severity) immediately
@@ -1669,8 +2177,8 @@ def run_tracking_and_fence(
                         or (is_vehicle and is_auth_veh)
                     ) and not active_behavior
 
-                    # Only add to intruder count if not authorized and not currently in grace window
-                    if is_confirmed_inside and not is_known_auth and tracker_id not in pending_zone_entries:
+                    # Only add to intruder count if not authorized, not wildlife, not foliage, and not currently in grace window
+                    if is_confirmed_inside and not is_known_auth and not is_wildlife and not is_foliage and tracker_id not in pending_zone_entries:
                         current_intruders.append((tracker_id, cls_name))
 
                     track_render_data.append({
@@ -1680,6 +2188,8 @@ def run_tracking_and_fence(
                         "bbox": (x1, y1, x2, y2),
                         "is_inside": is_confirmed_inside,
                         "active_behavior": active_behavior,
+                        "is_wildlife": is_wildlife,
+                        "is_foliage": is_foliage,
                         "face_bbox": face_bbox,
                         "identified_as": identified_as,
                         "identification_confidence": identification_confidence,
@@ -1793,10 +2303,14 @@ def run_tracking_and_fence(
                 )
                 is_in_grace = (tracker_id in pending_zone_entries)
 
-                if is_authorized_entry:
-                    box_color = (0, 255, 120)  # Bright Green for authorized routine access
-                elif is_vehicle and is_auth_veh:
-                    box_color = (0, 255, 120)  # Bright Green for authorized vehicle
+                is_wildlife_obj = obj.get("is_wildlife", False)
+                is_foliage_obj = obj.get("is_foliage", False)
+                if is_authorized_entry or (is_vehicle and is_auth_veh):
+                    box_color = (0, 255, 120)  # Green for authorized personnel or fleet vehicles
+                elif is_wildlife_obj:
+                    box_color = (0, 165, 255)  # Amber/Orange for wildlife
+                elif is_foliage_obj:
+                    box_color = (120, 120, 120)  # Neutral gray for foliage
                 elif is_vehicle and not is_auth_veh:
                     box_color = (0, 0, 255)  # Red for unauthorized vehicle
                 elif is_in_grace:
@@ -1825,6 +2339,10 @@ def run_tracking_and_fence(
                     status_tag = f" [AUTHORIZED: {auth_owner or 'FLEET'}]"
                 elif is_vehicle and not is_auth_veh:
                     status_tag = " [UNAUTHORIZED VEHICLE]"
+                elif is_wildlife_obj:
+                    status_tag = " [WILDLIFE FILTERED]"
+                elif is_foliage_obj:
+                    status_tag = " [FOLIAGE SUPPRESSED]"
                 elif is_in_grace:
                     status_tag = " [VERIFYING IDENTITY]"
                 elif is_confirmed_inside:
@@ -1929,9 +2447,10 @@ def run_tracking_and_fence(
                     if is_zone_intruded
                     else "PERIMETER: SECURE"
                 )
+            loop_tag = f" | Loop #{loop_iteration + 1}" if (loop and not is_live_stream) else ""
             hud_tier1 = (
                 f"IBVAP | {camera_id} ({resolved_cam_name}) | Frame: {frame_idx:04d} | {current_fps:4.1f} FPS"
-                f"{cpu_metric_str}{ram_metric_str} | {intruder_summary}"
+                f"{cpu_metric_str}{ram_metric_str}{loop_tag} | {intruder_summary}"
             )
             hud_text_color = (0, 100, 255) if is_zone_intruded else (0, 255, 255)
             cv2.putText(
@@ -1958,6 +2477,22 @@ def run_tracking_and_fence(
                 1,
                 cv2.LINE_AA,
             )
+
+            # Optical Tampering Alert Banner Overlay (Item 17)
+            if tamper_detector.current_tamper_state:
+                t_state = tamper_detector.current_tamper_state.replace("_", " ").upper()
+                cv2.rectangle(frame, (0, 0), (width, 54), (0, 0, 180), -1)
+                cv2.line(frame, (0, 54), (width, 54), (0, 0, 255), 3)
+                cv2.putText(
+                    frame,
+                    f"CRITICAL ALERT: OPTICAL CAMERA TAMPERING DETECTED ({t_state})",
+                    (14, 34),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.54,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
 
             # Draw Compliance, Night Mode & Weather Badges
             right_badge_x = width - 14

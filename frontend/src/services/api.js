@@ -83,10 +83,30 @@ export async function fetchAuthConfig() {
   return res.json();
 }
 
-export function getLiveFeedUrl(cameraId = 'CAM_01') {
+export function getLiveFeedUrl(cameraId = 'CAM_01', extraParams = {}) {
   const token = getAuthToken();
-  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  const params = new URLSearchParams();
+  if (token) params.set('token', token);
+  for (const [k, v] of Object.entries(extraParams || {})) {
+    if (v !== undefined && v !== null && v !== '') {
+      params.set(k, String(v));
+    }
+  }
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return `${API_BASE}/api/live-feed/${cameraId}${qs}`;
+}
+
+export function getLiveFrameUrl(cameraId = 'CAM_01', extraParams = {}) {
+  const token = getAuthToken();
+  const params = new URLSearchParams();
+  if (token) params.set('token', token);
+  for (const [k, v] of Object.entries(extraParams || {})) {
+    if (v !== undefined && v !== null && v !== '') {
+      params.set(k, String(v));
+    }
+  }
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return `${API_BASE}/api/live-feed/${cameraId}/frame${qs}`;
 }
 
 export async function fetchStats() {
@@ -441,3 +461,52 @@ export async function downloadVehiclesTemplate(format = 'csv') {
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
 }
+
+/**
+ * Upload an offline surveillance or test video file (MP4/AVI/MKV/MOV) (Item 26)
+ */
+export async function uploadVideoFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/api/video/upload`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to upload video file');
+  }
+  return res.json();
+}
+
+/**
+ * Fetch escalation siren & SMS webhook configuration (Item 25)
+ */
+export async function fetchEscalationConfig() {
+  const res = await fetch(`${API_BASE}/api/config/escalation`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to fetch escalation settings');
+  }
+  return res.json();
+}
+
+/**
+ * Update escalation siren & SMS webhook configuration (Item 25 - Admin)
+ */
+export async function updateEscalationConfig(config) {
+  const res = await fetch(`${API_BASE}/api/config/escalation`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to update escalation settings');
+  }
+  return res.json();
+}
+

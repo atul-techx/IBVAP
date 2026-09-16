@@ -161,9 +161,13 @@ class VoiceAlertService {
 
     const isAuthPerson = Boolean(
       event.is_authorized_person ||
+      event.is_authorized ||
       (eventType === 'authorized_person') ||
-      (eventType === 'authorized_entry' && !identifiedAs) ||
-      (event.is_authorized && !identifiedAs && !isVehicle)
+      (eventType === 'authorized_entry') ||
+      (identifiedAs && (
+        event.is_authorized !== false &&
+        ['atul', 'hardik', 'officer', 'guard', 'patrol', 'ssb', 'bsf', 'admin'].some(k => identifiedAs.toLowerCase().includes(k))
+      ))
     );
 
     // Rule 1: Authorized vehicle detected -> NEVER give voice alert (silent)
@@ -188,13 +192,13 @@ class VoiceAlertService {
       return `Suspicious pacing behavior${subject} detected near ${location}.`;
     }
 
-    // Rule 4: Watchlist profile identified (e.g. Capt Rajesh Kumar or wanted suspect)
-    if (identifiedAs && !isVehicle) {
+    // Rule 4: Watchlist profile identified (wanted suspects or unverified external subjects)
+    if (identifiedAs && !isVehicle && !isAuthPerson) {
       return `Watchlist match: ${identifiedAs} detected in area.`;
     }
 
     // Rule 5: Explicit unknown person detection alert
-    if (eventType === 'unauthorized_person' || (objectClass === 'person' && !identifiedAs)) {
+    if (!isAuthPerson && (eventType === 'unauthorized_person' || (objectClass === 'person' && !identifiedAs))) {
       return 'Unknown person detected in area.';
     }
 

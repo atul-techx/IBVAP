@@ -73,7 +73,7 @@ class WatchlistFaceRecognizer:
         self,
         watchlist_dir: Optional[Path] = None,
         models_dir: Optional[Path] = None,
-        cosine_threshold: float = 0.48,
+        cosine_threshold: float = 0.38,
     ):
         self.cosine_threshold = cosine_threshold
         if watchlist_dir is None:
@@ -270,22 +270,20 @@ class WatchlistFaceRecognizer:
 
             # Adaptive dynamic thresholding based on ambient illumination & face size
             if is_low_light:
-                base_thresh = 0.40
+                base_thresh = 0.34
             elif crop_mean_luma < 120.0:
-                base_thresh = 0.44
+                base_thresh = 0.36
             else:
                 base_thresh = self.cosine_threshold
 
             required_thresh = base_thresh
-            if fw < 26.0 or fh < 26.0:
-                required_thresh = max(required_thresh, base_thresh + 0.04)
-            elif fw < 38.0 or fh < 38.0:
+            if fw < 20.0 or fh < 20.0:
                 required_thresh = max(required_thresh, base_thresh + 0.02)
 
             # Separation Margin: confirmed match if clear lead over 2nd profile or high single score
             margin = best_sim - second_sim
             is_confident_match = (best_sim >= required_thresh) and (
-                margin >= 0.030 or best_sim >= 0.55 or len(scores) <= 1
+                margin >= 0.025 or best_sim >= 0.45 or len(scores) <= 1
             )
 
             if is_confident_match:
@@ -317,7 +315,7 @@ def get_watchlist_recognizer(reload: bool = False) -> Optional[WatchlistFaceReco
             _global_watchlist_recognizer = WatchlistFaceRecognizer(
                 watchlist_dir=backend_dir / "watchlist",
                 models_dir=backend_dir / "models",
-                cosine_threshold=0.48,
+                cosine_threshold=0.38,
             )
         except Exception:
             pass

@@ -141,6 +141,67 @@ def get_latest_event_hash(db_path: Optional[Path] = None) -> str:
 # In-memory hook for in-process WebSocket connection manager
 _in_process_event_listeners: List[Callable[[dict[str, Any]], Any]] = []
 
+# Escalation Channels (Item 25 - Siren Webhook & SMS Notifications)
+_escalation_config = {
+    "siren_webhook_url": os.environ.get("IBVAP_SIREN_WEBHOOK", ""),
+    "sms_webhook_url": os.environ.get("IBVAP_SMS_WEBHOOK", ""),
+    "min_severity": os.environ.get("IBVAP_ESCALATION_SEVERITY", "high"),
+    "enabled": True,
+}
+
+def get_escalation_config() -> dict[str, Any]:
+    return dict(_escalation_config)
+
+def update_escalation_config(new_config: dict[str, Any]) -> dict[str, Any]:
+    global _escalation_config
+    _escalation_config.update(new_config)
+    return dict(_escalation_config)
+
+def dispatch_escalation_channels(event_dict: dict[str, Any]):
+    """Dispatches asynchronous external siren and SMS webhook notifications for high/critical security events."""
+    if not _escalation_config.get("enabled"):
+        return
+    sev = str(event_dict.get("severity", "")).lower()
+    min_sev = str(_escalation_config.get("min_severity", "high")).lower()
+    is_qualifying = (sev == "critical") or (sev == "high" and min_sev != "critical")
+    if not is_qualifying:
+        return
+
+    def _post(url: str, payload: dict):
+        try:
+            import httpx
+            with httpx.Client(timeout=3.0) as client:
+                client.post(url, json=payload)
+        except Exception:
+            pass
+
+    payload = {
+        "platform": "IBVAP",
+        "event_id": event_dict.get("event_id"),
+        "camera_id": event_dict.get("camera_id"),
+        "event_type": event_dict.get("event_type"),
+        "severity": event_dict.get("severity"),
+        "tactical_summary": event_dict.get("tactical_summary"),
+        "timestamp": event_dict.get("timestamp"),
+    }
+
+    siren_url = _escalation_config.get("siren_webhook_url")
+    if siren_url:
+        threading.Thread(target=_post, args=(siren_url, {**payload, "channel": "siren"}), daemon=True).start()
+
+    sms_url = _escalation_config.get("sms_webhook_url")
+    if sms_url:
+        threading.Thread(target=_post, args=(sms_url, {**payload, "channel": "sms"}), daemon=True).start()
+
+def _notify_listeners(event_dict: dict[str, Any]):
+    """Notify all WebSocket listeners and dispatch external escalation siren/SMS channels."""
+    for listener in _in_process_event_listeners:
+        try:
+            listener(event_dict)
+        except Exception:
+            pass
+    dispatch_escalation_channels(event_dict)
+
 # Background non-blocking event worker queue
 _event_queue: queue.Queue = queue.Queue(maxsize=500)
 _worker_thread: Optional[threading.Thread] = None
