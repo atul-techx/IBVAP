@@ -53,47 +53,126 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       labelRaw: 'Raw CCTV Stream',
       description: 'Real-time deep learning neural network identifies unauthorized breach attempt along border razor-wire fence, instantly bounding the intruder with 94.2% tactical confidence.',
       detectionTag: 'BREACH DETECTED: 0.94 CONF',
-      hudOverlay: {
-        type: 'intrusion',
-        coords: { top: '45%', left: '57%', width: '13%', height: '36%' },
-        label: 'INTRUSION DETECTED • 94.2%',
-        sublabel: 'Sector 4 Razor-Wire Cut Alert',
-        severity: 'critical',
-      },
+      hudOverlays: [
+        {
+          coords: { top: '45%', left: '57%', width: '13%', height: '36%' },
+          label: 'INTRUSION DETECTED • 94.2%',
+          sublabel: 'Sector 4 Razor-Wire Cut Alert',
+          severity: 'critical',
+        },
+      ],
     },
     {
       id: 'bsf-patrol',
       title: 'Frontier Sentry Patrol & Perimeter Tracking',
       subtitle: 'CAM 06 • Border Zero-Line Sector 8 • 11:24 AM',
       rawImage: '/images/bsf_patrol_fence.png',
-      labelAi: 'Sentry Formation & Perimeter AI',
+      labelAi: 'Multi-Target Sentry AI Telemetry',
       labelRaw: 'Raw Video Feed',
-      description: 'Multi-target neural tracking continuously monitors Border Security Force foot patrol formations along zero-line demarcation fencing, verifying sentry biometric telemetry and perimeter fence integrity.',
-      detectionTag: 'BSF SENTRY PATROL • 7 PERSONNEL DETECTED • NOMINAL',
-      hudOverlay: {
-        type: 'patrol',
-        coords: { top: '32%', left: '20%', width: '42%', height: '58%' },
-        label: 'BSF PATROL FORMATION • 96.8%',
-        sublabel: 'Demarcation Sentry Unit • Intact',
-        severity: 'secure',
-      },
+      description: 'Multi-target deep neural network identifies each Border Security Force sentry individually along zero-line demarcation fencing, verifying sentry formation, armed readiness, and continuous biometric telemetry.',
+      detectionTag: 'BSF SENTRY PATROL • 9 SOLDIERS DETECTED • INDIVIDUALLY TRACKED',
+      hudOverlays: [
+        {
+          coords: { top: '34%', left: '21%', width: '13.5%', height: '58%' },
+          label: 'PATROL 01 • BSF 98.4%',
+          sublabel: 'Lead Sentry • INSAS Rifle',
+          severity: 'secure',
+        },
+        {
+          coords: { top: '34%', left: '41.5%', width: '13%', height: '52%' },
+          label: 'PATROL 02 • BSF 97.9%',
+          sublabel: 'Sub-Inspector • Armed',
+          severity: 'secure',
+        },
+        {
+          coords: { top: '36.5%', left: '70.5%', width: '13.5%', height: '51%' },
+          label: 'PATROL 03 • BSF 98.6%',
+          sublabel: 'Perimeter Sentry • Armed',
+          severity: 'secure',
+        },
+        {
+          coords: { top: '42.5%', left: '52.5%', width: '8.5%', height: '36%' },
+          label: 'PATROL 04 • 96.2%',
+          sublabel: 'Sentry Formation',
+          severity: 'secure',
+          compact: true,
+        },
+        {
+          coords: { top: '47%', left: '35.5%', width: '7.5%', height: '30%' },
+          label: 'PATROL 05 • 95.8%',
+          severity: 'secure',
+          compact: true,
+        },
+        {
+          coords: { top: '41%', left: '15.5%', width: '7.8%', height: '40%' },
+          label: 'PATROL 06 • 96.5%',
+          severity: 'secure',
+          compact: true,
+        },
+        {
+          coords: { top: '46%', left: '10%', width: '6.2%', height: '31%' },
+          label: 'PATROL 07 • 94.1%',
+          severity: 'secure',
+          compact: true,
+        },
+        {
+          coords: { top: '49%', left: '6%', width: '4.8%', height: '25%' },
+          label: 'PATROL 08 • 93.7%',
+          severity: 'secure',
+          compact: true,
+        },
+        {
+          coords: { top: '51%', left: '2.5%', width: '4.2%', height: '22%' },
+          label: 'PATROL 09 • 92.5%',
+          severity: 'secure',
+          compact: true,
+        },
+      ],
     },
     {
       id: 'military-convoy',
       title: 'Mountain Checkpoint & Convoy Movement ANPR',
       subtitle: 'CAM 02 • High-Altitude Transit Checkpost • 14:15 PM',
       rawImage: '/images/army_convoy_checkpoint.png',
-      labelAi: 'Convoy Telemetry & Tactical ANPR',
+      labelAi: 'Multi-Vehicle Convoy Telemetry & ANPR',
       labelRaw: 'Raw CCTV Stream',
-      description: 'Automated vehicle recognition and optical character consensus track military convoy troop carriers through mountain transit passes, validating defense convoy manifests and automated barrier clearance.',
-      detectionTag: 'DEFENSE CONVOY • 3 VEHICLES DETECTED • AUTHORIZED PASS',
-      hudOverlay: {
-        type: 'anpr',
-        coords: { top: '56%', left: '15%', width: '38%', height: '38%' },
-        label: 'TACTICAL CONVOY LEAD • DEFENSE TRANSPORT',
-        sublabel: 'Convoy Unit 01 • Checkpoint Cleared',
-        severity: 'authorized',
-      },
+      description: 'Concurrent multi-vehicle ANPR and neural classification track every transport truck and escort in the convoy passing through the mountain gate, validating defense manifests and automated barrier clearance.',
+      detectionTag: 'DEFENSE CONVOY • ALL 4 VEHICLES DETECTED • CLEARANCE GRANTED',
+      hudOverlays: [
+        {
+          coords: { top: '56%', left: '14.5%', width: '38%', height: '38%' },
+          label: 'CONVOY 01 • MH-12-ARMY',
+          sublabel: 'Ashok Leyland 4x4 • AUTHORIZED',
+          severity: 'authorized',
+        },
+        {
+          coords: { top: '54%', left: '64%', width: '20%', height: '20%' },
+          label: 'CONVOY 02 • DEFENSE TRANSPORT',
+          sublabel: 'Troop Carrier • AUTHORIZED',
+          severity: 'authorized',
+        },
+        {
+          coords: { top: '68%', left: '62.5%', width: '9.2%', height: '19%' },
+          label: 'ESCORT CAR • DL-01-DEF',
+          sublabel: 'Sentry Escort • CLEARED',
+          severity: 'authorized',
+          compact: true,
+        },
+        {
+          coords: { top: '53%', left: '85.5%', width: '9.5%', height: '15%' },
+          label: 'CONVOY 03 • LOGISTICS 4x4',
+          sublabel: 'Supply Carrier • AUTHORIZED',
+          severity: 'authorized',
+          compact: true,
+        },
+        {
+          coords: { top: '68%', left: '56.5%', width: '4.5%', height: '16%' },
+          label: 'GATE SENTRY',
+          sublabel: 'Barrier Operator',
+          severity: 'secure',
+          compact: true,
+        },
+      ],
     },
   ];
 
@@ -348,26 +427,31 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
                   className="slider-img"
                   draggable={false}
                 />
-                {/* AI HUD Bounding Box Overlay */}
-                <div
-                  className={`ai-bounding-box ${currentScenario.hudOverlay.severity}`}
-                  style={{
-                    top: currentScenario.hudOverlay.coords.top,
-                    left: currentScenario.hudOverlay.coords.left,
-                    width: currentScenario.hudOverlay.coords.width,
-                    height: currentScenario.hudOverlay.coords.height,
-                  }}
-                >
-                  <div className="ai-box-tag">
-                    <span className="box-indicator"></span>
-                    <span>{currentScenario.hudOverlay.label}</span>
+                {/* AI HUD Multi-Target Bounding Box Overlays */}
+                {(currentScenario.hudOverlays || (currentScenario.hudOverlay ? [currentScenario.hudOverlay] : [])).map((box, bIdx) => (
+                  <div
+                    key={bIdx}
+                    className={`ai-bounding-box ${box.severity || 'secure'} ${box.compact ? 'compact' : ''}`}
+                    style={{
+                      top: box.coords.top,
+                      left: box.coords.left,
+                      width: box.coords.width,
+                      height: box.coords.height,
+                    }}
+                  >
+                    {box.label && (
+                      <div className="ai-box-tag">
+                        <span className="box-indicator"></span>
+                        <span>{box.label}</span>
+                      </div>
+                    )}
+                    {box.sublabel && <div className="ai-box-sub">{box.sublabel}</div>}
+                    <div className="box-corner tl"></div>
+                    <div className="box-corner tr"></div>
+                    <div className="box-corner bl"></div>
+                    <div className="box-corner br"></div>
                   </div>
-                  <div className="ai-box-sub">{currentScenario.hudOverlay.sublabel}</div>
-                  <div className="box-corner tl"></div>
-                  <div className="box-corner tr"></div>
-                  <div className="box-corner bl"></div>
-                  <div className="box-corner br"></div>
-                </div>
+                ))}
 
                 <div className="slider-label label-left">
                   <span className="label-badge ai">AI ANALYTICS OVERLAY</span>

@@ -4239,6 +4239,36 @@ body {
   border-radius: 0 0 3px 3px;
 }
 
+.box-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+}
+
+.ai-bounding-box.compact {
+  border-width: 1.5px;
+}
+
+.ai-bounding-box.compact .ai-box-tag {
+  font-size: 0.56rem;
+  padding: 0.08rem 0.32rem;
+  top: -18px;
+  gap: 0.2rem;
+}
+
+.ai-bounding-box.compact .box-indicator {
+  width: 4px;
+  height: 4px;
+}
+
+.ai-bounding-box.compact .ai-box-sub {
+  font-size: 0.5rem;
+  padding: 0.06rem 0.25rem;
+  bottom: -16px;
+}
+
 /* Corner Reticles */
 .box-corner {
   position: absolute;
