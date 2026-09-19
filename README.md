@@ -545,5 +545,5 @@ For collaborative hackathon environments where team members continuously push up
 
 <div align="center">
   <b>Developed for Smart India Hackathon 2026</b><br>
-  <i>Engineered with precision for secure, intelligent, and tamper-evident border surveillance.</i>
+  <i>Engineered with precision for secure, intelligent, and tamper-evident border surveillance. </i>
 </div>
