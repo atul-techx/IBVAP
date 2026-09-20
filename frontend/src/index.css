@@ -5227,6 +5227,21 @@ body {
   margin-bottom: 3rem;
 }
 
+.footer-nav-brand .brand-name {
+  color: #ffffff !important;
+  font-size: 1.45rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.06em !important;
+  text-shadow: 0 2px 12px rgba(56, 189, 248, 0.4) !important;
+}
+
+.footer-nav-brand .brand-sub {
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  letter-spacing: 0.02em !important;
+}
+
 .footer-brand-desc {
   font-size: 0.85rem;
   color: #94a3b8;

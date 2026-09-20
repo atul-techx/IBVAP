@@ -1054,13 +1054,17 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
         <div className="footer-main">
           <div className="section-container footer-grid">
             <div className="footer-brand-col">
-              <div className="nav-brand">
+              <div className="nav-brand footer-nav-brand">
                 <div className="brand-shield-icon">
-                  <ShieldAlert size={20} />
+                  <ShieldAlert size={22} color="#38bdf8" />
                 </div>
                 <div className="brand-text-block">
-                  <span className="brand-name">IBVAP</span>
-                  <span className="brand-sub">Smart India Hackathon 2026</span>
+                  <span className="brand-name" style={{ color: '#ffffff', fontSize: '1.4rem', fontWeight: 900, letterSpacing: '0.06em', textShadow: '0 2px 10px rgba(56, 189, 248, 0.35)' }}>
+                    IBVAP
+                  </span>
+                  <span className="brand-sub" style={{ color: '#38bdf8', fontWeight: 600, fontSize: '0.8rem', letterSpacing: '0.02em' }}>
+                    Smart India Hackathon 2026
+                  </span>
                 </div>
               </div>
               <p className="footer-brand-desc">
