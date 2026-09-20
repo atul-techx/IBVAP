@@ -568,8 +568,8 @@ For multi-developer hackathon environments:
 
 <div align="center">
 
-**Developed for Smart India Hackathon (SIH) 2026**  
-*Engineered with precision for secure, intelligent, and tamper-evident border surveillance.*
+**Developed for Smart India Hackathon (SIH) 2026**<br>
+<i>Engineered with precision for secure, intelligent, and tamper-evident border surveillance.</i>
 
 [![GitHub Stars](https://img.shields.io/github/stars/atul-techx/IBVAP?style=social)](https://github.com/atul-techx/IBVAP)
 [![GitHub Forks](https://img.shields.io/github/forks/atul-techx/IBVAP?style=social)](https://github.com/atul-techx/IBVAP)
