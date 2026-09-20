@@ -378,6 +378,9 @@ _easyocr_reader = None
 def get_or_create_easyocr_reader():
     """Lazy initialize EasyOCR English reader (runs on CPU with PyTorch optimizations)."""
     global _easyocr_reader
+    # In cloud/low-memory environments (e.g. Railway 512MB RAM), avoid loading heavy 300MB CRAFT models
+    if os.environ.get("DISABLE_EASYOCR", "0") == "1" or os.environ.get("LOW_MEMORY_MODE", "0") == "1":
+        return None
     if _easyocr_reader is None:
         try:
             import easyocr
@@ -2967,9 +2970,12 @@ def main():
     else:
         imgsz = 384 if isinstance(input_source, int) else 640
 
-    # Output path handling
+    if os.environ.get("LOW_MEMORY_MODE", "0") == "1":
+        imgsz = min(imgsz, 320)
+
+    # Output path handling: do NOT write bloated annotated video files to disk during headless streaming
     output_path = args.output
-    if output_path is None and isinstance(input_source, Path):
+    if output_path is None and isinstance(input_source, Path) and not args.no_display:
         output_path = str(test_videos_dir / f"annotated_{input_source.stem}.mp4")
 
     run_tracking_and_fence(
