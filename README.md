@@ -1,11 +1,17 @@
-# 🛡️ IBVAP – Intelligent Border Video Analytics Platform
-
 <div align="center">
 
-![IBVAP Banner](frontend/public/images/indian_army_command_center.png)
+<img src="frontend/public/images/ibvap_logo.png" alt="IBVAP Logo" width="220" />
+
+# 🛡️ IBVAP – Intelligent Border Video Analytics Platform
 
 ### **Next-Generation Autonomous Multi-Camera AI Surveillance & Tactical Command System**
 *Engineered for Smart India Hackathon (SIH) 2026*
+
+<br/>
+
+![IBVAP Banner](frontend/public/images/indian_army_command_center.png)
+
+<br/>
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)

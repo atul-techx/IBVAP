@@ -41,8 +41,8 @@ export default function Header({
   return (
     <header className="top-header">
       <div className="brand-section" onClick={() => setActiveTab('overview')} style={{ cursor: 'pointer' }} title="Return to Platform Overview">
-        <div className="brand-logo" title="Intelligent Border Video Analytics Platform">
-          <ShieldAlert size={22} />
+        <div className="brand-logo" title="Intelligent Border Video Analytics Platform" style={{ background: 'transparent', boxShadow: 'none', padding: 0 }}>
+          <img src="/images/ibvap_logo.png" alt="IBVAP Logo" style={{ width: '38px', height: 'auto', objectFit: 'contain' }} />
         </div>
         <div>
           <div className="brand-title">
