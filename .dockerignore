@@ -24,6 +24,7 @@ __pycache__
 backend/*.db
 backend/*.db-shm
 backend/*.db-wal
+backend/test_*.db
 .env
 *.env
 *.pem
@@ -35,8 +36,15 @@ backend/snapshots/*
 backend/test_data/
 backend/test_videos/annotated_*.mp4
 backend/test_videos/output_*.mp4
+backend/test_videos/upload_*.mp4
+backend/test_videos/replays/*.mp4
+backend/test_videos/replays/*.json
+!backend/test_videos/replays/.gitkeep
 
-# Node & Frontend Dependencies
+# Duplicate weights (root yolov8n.pt is kept)
+backend/*.pt
+
+# Node & Frontend Build Cache
 node_modules
 frontend/node_modules
 .npm

@@ -362,9 +362,20 @@ ws_manager = ConnectionManager()
 register_event_listener(ws_manager.trigger_in_process_broadcast)
 
 
+def is_cloud_environment() -> bool:
+    """Detect if running inside constrained cloud container (Railway, Render, Fly) or low-memory mode."""
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RENDER")
+        or os.environ.get("FLY_ALLOC_ID")
+        or os.environ.get("DYNO")
+        or os.environ.get("LOW_MEMORY_MODE", "0") == "1"
+    )
+
+
 @app.on_event("startup")
 async def on_startup():
-    """Startup lifecycle: initialize database tables, sync Cloudinary CDN watchlist, warm face embeddings, and start background workers."""
+    """Startup lifecycle: initialize database tables, sync Cloudinary CDN watchlist, and start background workers."""
     print("[*] IBVAP FastAPI Backend booting up...")
 
     # 1. Initialize SQLite / PostgreSQL Database & Admin Tables
@@ -387,15 +398,16 @@ async def on_startup():
     except Exception as e:
         print(f"[!] Cloud watchlist sync notice: {e}")
 
-    # 3. Pre-load Face Recognizer & cache embeddings in memory
-    try:
-        rec = get_active_face_recognizer(reload=True)
-        if rec and hasattr(rec, "watchlist_embeddings"):
-            print(f"[+] Face Recognizer warmed up: {len(rec.watchlist_embeddings)} identities active.")
-    except Exception as e:
-        print(f"[!] Face recognizer warmup notice: {e}")
+    # 3. Only pre-load face recognizer if NOT in cloud/low-memory mode (saves ~80MB)
+    if not is_cloud_environment():
+        try:
+            rec = get_active_face_recognizer(reload=True)
+            if rec and hasattr(rec, "watchlist_embeddings"):
+                print(f"[+] Face Recognizer warmed up: {len(rec.watchlist_embeddings)} identities active.")
+        except Exception as e:
+            print(f"[!] Face recognizer warmup notice: {e}")
 
-    # 4. Start WebSocket Heartbeat task
+    # 4. Start WebSocket Heartbeat task (single instance)
     try:
         asyncio.create_task(ws_manager.start_heartbeat())
         print("[+] WebSocket keepalive heartbeat task started.")
@@ -409,9 +421,67 @@ async def on_startup():
     except Exception as e:
         print(f"[!] Event retention daemon start notice: {e}")
 
+    # 6. Camera stream initialization:
+    # In cloud environments (Railway/Render), DO NOT auto-launch heavy inference on boot!
+    # This prevents the container from exceeding 512MB RAM and dying with OOM.
+    # Streams start on-demand when an operator connects to the live feed.
+    if not is_cloud_environment():
+        try:
+            ensure_default_stream_running(camera_id="CAM_01")
+            print("[+] IBVAP Surveillance Pipeline auto-started for CAM_01 (Loop mode).")
+        except Exception as e:
+            print(f"[!] Warning: Could not auto-start camera stream: {e}")
+    else:
+        print("[+] Cloud/Low-Memory Mode: Streaming inference will start on-demand when feeds are viewed (RAM protected <= 250MB).")
+
+    import gc
+    gc.collect()
+
 # Active background analytics stream processes: camera_id -> subprocess.Popen
 ACTIVE_STREAM_PROCESSES: dict[str, subprocess.Popen] = {}
 STREAM_PROCESSES_LOCK = threading.Lock()
+
+
+def kill_all_camera_processes():
+    """Forcefully terminate ALL active camera stream processes to guarantee minimal RAM footprint."""
+    target_pids = set()
+
+    with STREAM_PROCESSES_LOCK:
+        for cam_id, proc in list(ACTIVE_STREAM_PROCESSES.items()):
+            if proc:
+                target_pids.add(proc.pid)
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        ACTIVE_STREAM_PROCESSES.clear()
+
+    try:
+        import psutil
+        current_pid = os.getpid()
+        for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if p.info['pid'] == current_pid:
+                    continue
+                cmdline = p.info.get('cmdline') or []
+                cmd_str = " ".join(cmdline)
+                if "detection_tracking.py" in cmd_str:
+                    target_pids.add(p.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        print(f"[!] Warning inspecting processes for kill_all: {e}")
+
+    for pid in target_pids:
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
+            else:
+                import psutil
+                p = psutil.Process(pid)
+                p.kill()
+        except Exception:
+            pass
 
 
 def kill_camera_processes(camera_id: str):
@@ -467,8 +537,12 @@ def launch_analytics_stream(
     script_path = app_dir / "detection_tracking.py"
     test_videos_dir = app_dir.parent / "test_videos"
 
-    # Cleanly terminate any running instance of this camera stream first
-    kill_camera_processes(camera_id)
+    # Cleanly terminate processes: In cloud/low-memory mode, terminate ALL other streams to enforce strictly ONE stream
+    if is_cloud_environment():
+        kill_all_camera_processes()
+        imgsz = min(imgsz, 320)
+    else:
+        kill_camera_processes(camera_id)
 
     cmd = [
         sys.executable,
@@ -536,6 +610,9 @@ def launch_analytics_stream(
     sub_env["OPENBLAS_NUM_THREADS"] = "1"
     sub_env["MKL_NUM_THREADS"] = "1"
     sub_env["PYTHONUNBUFFERED"] = "1"
+    if is_cloud_environment():
+        sub_env["LOW_MEMORY_MODE"] = "1"
+        sub_env["DISABLE_EASYOCR"] = "1"
     print(f"[+] Launching stream process for {camera_id}: {' '.join(cmd)}")
 
     proc = subprocess.Popen(
@@ -570,25 +647,8 @@ def ensure_default_stream_running(camera_id: str = "CAM_01"):
             return proc
     default_source = DEFAULT_CAMERA_FEEDS.get(camera_id, "0" if camera_id == "CAM_01" else "sample.mp4")
     source_type = "webcam" if default_source == "0" else "test_video"
-    imgsz = 384 if source_type == "webcam" else 480
+    imgsz = 320 if is_cloud_environment() else (384 if source_type == "webcam" else 480)
     return launch_analytics_stream(camera_id=camera_id, source_type=source_type, source=default_source, imgsz=imgsz)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup, launch keepalive heartbeat task, auto-start surveillance loop, and begin event retention daemon."""
-    init_db()
-    asyncio.create_task(ws_manager.start_heartbeat())
-    try:
-        start_event_retention_daemon(interval_seconds=300, max_age_minutes=30)
-    except Exception as e:
-        print(f"[!] Warning: Could not start event retention daemon: {e}")
-    try:
-        ensure_default_stream_running(camera_id="CAM_01")
-        print("[+] IBVAP Surveillance Pipeline auto-started for CAM_01 (Loop mode).")
-    except Exception as e:
-        print(f"[!] Warning: Could not auto-start camera stream: {e}")
-    print("[+] IBVAP FastAPI Server initialized with WebSocket heartbeat.")
 
 
 @app.on_event("shutdown")
