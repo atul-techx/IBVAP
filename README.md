@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![IBVAP Banner](frontend/public/images/defense_command_center.jpg)
+![IBVAP Banner](frontend/public/images/indian_army_command_center.png)
 
 ### **Next-Generation Autonomous Multi-Camera AI Surveillance & Tactical Command System**
 *Engineered for Smart India Hackathon (SIH) 2026*
