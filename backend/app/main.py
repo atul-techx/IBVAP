@@ -2247,6 +2247,10 @@ if frontend_dist.exists() and (frontend_dist / "index.html").exists():
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+    images_dir = frontend_dist / "images"
+    if images_dir.exists():
+        app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
+
     audit_images_dir = frontend_dist / "audit_images"
     if audit_images_dir.exists():
         app.mount("/audit_images", StaticFiles(directory=str(audit_images_dir)), name="audit_images")
