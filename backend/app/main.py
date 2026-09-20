@@ -973,13 +973,17 @@ def get_watchlist_photo(
     clean_filename = Path(filename).name
     photo_path = get_watchlist_dir() / clean_filename
 
-    # If photo missing locally, attempt on-demand recovery from Cloudinary CDN
+    # If photo missing locally, attempt on-demand recovery from PostgreSQL photo_base64 or Cloudinary CDN
     if not photo_path.exists() and clean_filename not in ("", "none", "default_avatar.png"):
         try:
             cand_name = clean_filename.rsplit(".", 1)[0].replace("_", " ")
             person = get_watchlist_person(cand_name)
-            if person and person.get("image_url"):
-                download_image_from_url(person["image_url"], photo_path)
+            if person:
+                if person.get("photo_base64"):
+                    with open(photo_path, "wb") as f:
+                        f.write(base64.b64decode(person["photo_base64"]))
+                elif person.get("image_url"):
+                    download_image_from_url(person["image_url"], photo_path)
         except Exception:
             pass
 

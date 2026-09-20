@@ -6,6 +6,7 @@ Provides backend database management and validation for:
 3. On-demand Watchlist embedding re-synchronization
 """
 
+import base64
 import csv
 import io
 import os
@@ -135,6 +136,12 @@ def init_admin_tables(db_path: Optional[Path] = None):
         except Exception:
             pass
 
+        try:
+            cursor.execute("ALTER TABLE watchlist_personnel ADD COLUMN photo_base64 TEXT")
+            conn.commit()
+        except Exception:
+            pass
+
         # 2. Authorized Vehicles Whitelist Table
         cursor.execute(
             f"""
@@ -165,6 +172,7 @@ def init_admin_tables(db_path: Optional[Path] = None):
                 "akanksha": "Command Staff",
                 "anshika": "Border Patrol Officer",
                 "atul": "Surveillance Operator",
+                "hardik": "Field Patrol Specialist",
             }
 
             for p in sorted(watchlist_dir.iterdir()):
@@ -177,14 +185,21 @@ def init_admin_tables(db_path: Optional[Path] = None):
                     if is_cloud_storage_configured():
                         cdn_url = upload_watchlist_image(p, public_id=stem_clean.lower())
 
+                    b64_str = None
+                    try:
+                        with open(p, "rb") as pf:
+                            b64_str = base64.b64encode(pf.read()).decode("utf-8")
+                    except Exception:
+                        pass
+
                     cursor.execute(
                         """
                         INSERT INTO watchlist_personnel
-                        (name, role, photo_filename, image_url, expiry_date, notes, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, NULL, 'Pre-configured reference profile', ?, ?)
+                        (name, role, photo_filename, image_url, photo_base64, expiry_date, notes, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, NULL, 'Pre-configured reference profile', ?, ?)
                         ON CONFLICT (name) DO NOTHING
                         """,
-                        (display_name, role, p.name, cdn_url, now_iso, now_iso),
+                        (display_name, role, p.name, cdn_url, b64_str, now_iso, now_iso),
                     )
             conn.commit()
 
@@ -212,11 +227,8 @@ def init_admin_tables(db_path: Optional[Path] = None):
 
 def sync_cloud_watchlist_to_disk(watchlist_dir: Optional[Path] = None, db_path: Optional[Path] = None) -> int:
     """
-    Bidirectional sync between Cloudinary CDN and local watchlist directory:
-    1. If a profile in database has an image_url (Cloudinary CDN) and the image is missing from local disk,
-       download it so facial embeddings can be computed locally by YuNet/SFace.
-    2. If a profile has a local photo but no image_url, upload it to Cloudinary and update database record.
-    Returns number of photos restored/synced.
+    Restore and synchronize watchlist photos from database (photo_base64) and Cloudinary CDN to local disk.
+    Ensures photos survive container redeployments seamlessly without data loss.
     """
     if watchlist_dir is None:
         watchlist_dir = get_watchlist_dir()
@@ -226,47 +238,65 @@ def sync_cloud_watchlist_to_disk(watchlist_dir: Optional[Path] = None, db_path: 
         db_path = get_default_db_path()
     init_admin_tables(db_path)
 
-    if not is_cloud_storage_configured():
-        return 0
-
     synced_count = 0
     try:
         with get_db_connection(db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name, photo_filename, image_url FROM watchlist_personnel")
+            cursor.execute("SELECT name, photo_filename, image_url, photo_base64 FROM watchlist_personnel")
             records = cursor.fetchall_dicts()
 
             for rec in records:
                 name = rec.get("name", "").strip()
                 photo_file = (rec.get("photo_filename") or "").strip()
                 image_url = rec.get("image_url")
-                if not name:
+                photo_b64 = rec.get("photo_base64")
+                if not name or not photo_file or photo_file == "default_avatar.png":
                     continue
 
                 safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", name.lower())
+                target_file = watchlist_dir / photo_file
 
-                # Scenario A: Has Cloudinary URL, but local file missing or empty (e.g. freshly rebuilt container)
-                if image_url and photo_file and photo_file != "default_avatar.png":
-                    target_file = watchlist_dir / photo_file
-                    if not target_file.exists() or target_file.stat().st_size < 200:
-                        print(f"[*] Restoring watchlist photo for '{name}' from Cloudinary CDN: {image_url}")
-                        ok = download_image_from_url(image_url, target_file)
-                        if ok:
-                            synced_count += 1
+                # Priority 1: Restore directly from PostgreSQL photo_base64
+                if (not target_file.exists() or target_file.stat().st_size < 200) and photo_b64:
+                    try:
+                        raw_bytes = base64.b64decode(photo_b64)
+                        with open(target_file, "wb") as f:
+                            f.write(raw_bytes)
+                        synced_count += 1
+                        print(f"[+] Restored watchlist photo '{photo_file}' for '{name}' directly from PostgreSQL DB!")
+                        continue
+                    except Exception as err:
+                        print(f"[!] DB photo decode notice for '{name}': {err}")
 
-                # Scenario B: Has local photo, but missing Cloudinary URL (e.g. added before Cloudinary was connected)
-                elif not image_url and photo_file and photo_file != "default_avatar.png":
-                    target_file = watchlist_dir / photo_file
-                    if target_file.exists() and target_file.stat().st_size >= 200:
-                        print(f"[*] Uploading un-synced watchlist photo for '{name}' to Cloudinary CDN...")
-                        cdn_url = upload_watchlist_image(target_file, public_id=safe_stem)
-                        if cdn_url:
-                            cursor.execute(
-                                "UPDATE watchlist_personnel SET image_url = ? WHERE LOWER(name) = LOWER(?)",
-                                (cdn_url, name),
-                            )
-                            conn.commit()
-                            synced_count += 1
+                # Priority 2: Restore from Cloudinary CDN if URL exists
+                if (not target_file.exists() or target_file.stat().st_size < 200) and image_url:
+                    print(f"[*] Restoring watchlist photo for '{name}' from Cloudinary CDN: {image_url}")
+                    ok = download_image_from_url(image_url, target_file)
+                    if ok:
+                        synced_count += 1
+
+                # Priority 3: If local photo exists, ensure photo_base64 in DB is populated
+                if target_file.exists() and target_file.stat().st_size >= 200 and not photo_b64:
+                    try:
+                        with open(target_file, "rb") as pf:
+                            b64_val = base64.b64encode(pf.read()).decode("utf-8")
+                        cursor.execute(
+                            "UPDATE watchlist_personnel SET photo_base64 = ? WHERE LOWER(name) = LOWER(?)",
+                            (b64_val, name),
+                        )
+                        conn.commit()
+                    except Exception:
+                        pass
+
+                # Priority 4: Upload to Cloudinary if configured and image_url is missing
+                if is_cloud_storage_configured() and not image_url and target_file.exists() and target_file.stat().st_size >= 200:
+                    cdn_url = upload_watchlist_image(target_file, public_id=safe_stem)
+                    if cdn_url:
+                        cursor.execute(
+                            "UPDATE watchlist_personnel SET image_url = ? WHERE LOWER(name) = LOWER(?)",
+                            (cdn_url, name),
+                        )
+                        conn.commit()
     except Exception as e:
         print(f"[!] Warning during sync_cloud_watchlist_to_disk: {e}")
 
@@ -372,12 +402,23 @@ def add_or_update_watchlist_person(
         if local_p.exists() and is_cloud_storage_configured():
             final_image_url = upload_watchlist_image(local_p, public_id=safe_stem)
 
+    # Convert photo to base64 so it is permanently preserved directly in PostgreSQL
+    photo_b64 = None
+    if photo_file and photo_file != "default_avatar.png":
+        local_p = watchlist_dir / photo_file
+        if local_p.exists() and local_p.stat().st_size > 100:
+            try:
+                with open(local_p, "rb") as pf:
+                    photo_b64 = base64.b64encode(pf.read()).decode("utf-8")
+            except Exception:
+                pass
+
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO watchlist_personnel (name, role, photo_filename, image_url, face_embedding, expiry_date, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO watchlist_personnel (name, role, photo_filename, image_url, face_embedding, photo_base64, expiry_date, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
                 role = excluded.role,
                 photo_filename = CASE 
@@ -386,11 +427,12 @@ def add_or_update_watchlist_person(
                 END,
                 image_url = COALESCE(excluded.image_url, watchlist_personnel.image_url),
                 face_embedding = COALESCE(excluded.face_embedding, watchlist_personnel.face_embedding),
+                photo_base64 = COALESCE(excluded.photo_base64, watchlist_personnel.photo_base64),
                 expiry_date = excluded.expiry_date,
                 notes = excluded.notes,
                 updated_at = excluded.updated_at
             """,
-            (clean_name, role.strip(), photo_file, final_image_url, face_embedding, expiry_date or None, notes or None, now_iso, now_iso),
+            (clean_name, role.strip(), photo_file, final_image_url, face_embedding, photo_b64, expiry_date or None, notes or None, now_iso, now_iso),
         )
         conn.commit()
 
