@@ -81,9 +81,9 @@ export default function LoginPage({ onCancel }) {
         )}
         {/* Header Branding */}
         <div className="login-header">
-          <div className="login-logo-container">
+          <div className="login-logo-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div className="login-logo-ring" />
-            <ShieldAlert size={26} className="login-logo-icon" />
+            <img src="/images/ibvap_logo.png" alt="IBVAP Logo" style={{ width: '48px', height: 'auto', objectFit: 'contain', zIndex: 2, position: 'relative' }} />
           </div>
           <div className="login-title-group">
             <div className="login-badge">

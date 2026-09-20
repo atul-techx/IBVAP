@@ -249,8 +249,8 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
           /* Unauthenticated Public Landing Nav */
           <div className="nav-inner">
             <div className="nav-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-              <div className="brand-shield-icon">
-                <ShieldAlert size={22} />
+              <div className="brand-shield-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
+                <img src="/images/ibvap_logo.png" alt="IBVAP Logo" style={{ width: '42px', height: 'auto', objectFit: 'contain' }} />
               </div>
               <div className="brand-text-block">
                 <div className="brand-title-row">
@@ -1055,8 +1055,8 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
           <div className="section-container footer-grid">
             <div className="footer-brand-col">
               <div className="nav-brand footer-nav-brand">
-                <div className="brand-shield-icon">
-                  <ShieldAlert size={22} color="#38bdf8" />
+                <div className="brand-shield-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
+                  <img src="/images/ibvap_logo.png" alt="IBVAP Logo" style={{ width: '46px', height: 'auto', objectFit: 'contain' }} />
                 </div>
                 <div className="brand-text-block">
                   <span className="brand-name" style={{ color: '#ffffff', fontSize: '1.4rem', fontWeight: 900, letterSpacing: '0.06em', textShadow: '0 2px 10px rgba(56, 189, 248, 0.35)' }}>
