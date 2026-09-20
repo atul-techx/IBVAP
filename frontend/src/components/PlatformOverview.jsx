@@ -722,7 +722,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
               </div>
               <div className="card-image-wrap">
                 <img
-                  src="/images/real_tactical_videowall.jpg"
+                  src="/images/real_tactical_videowall.png"
                   alt="Multi-camera dynamic video wall in military operations center"
                   className="card-feature-img"
                 />
@@ -794,7 +794,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
               </div>
               <div className="card-image-wrap">
                 <img
-                  src="/images/real_cctv_telemetry.jpg"
+                  src="/images/real_cctv_telemetry.png"
                   alt="Live feeds, biometric facial recognition and license plate telemetry"
                   className="card-feature-img"
                 />
