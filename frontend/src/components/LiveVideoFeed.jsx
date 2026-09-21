@@ -398,13 +398,15 @@ export default function LiveVideoFeed({
         canvas.width = vw;
         canvas.height = vh;
       }
-      if (offscreenCanvas.width !== 640 || offscreenCanvas.height !== 360) {
-        offscreenCanvas.width = 640;
-        offscreenCanvas.height = 360;
+      const targetW = 640;
+      const targetH = Math.max(360, Math.round((640 * vh) / vw));
+      if (offscreenCanvas.width !== targetW || offscreenCanvas.height !== targetH) {
+        offscreenCanvas.width = targetW;
+        offscreenCanvas.height = targetH;
       }
 
       try {
-        offscreenCtx.drawImage(video, 0, 0, 640, 360);
+        offscreenCtx.drawImage(video, 0, 0, targetW, targetH);
         const dataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.65);
 
         isSendingFrameRef.current = true;
@@ -429,10 +431,13 @@ export default function LiveVideoFeed({
             (d) => isVehicleClass(d.class_name) && !d.is_authorized_vehicle && !d.is_authorized
           );
 
-          setClientUnknownPersonCount(unknownPersons.length);
+          // If virtual fence is active, only count persons inside the fence corridor as threat intruders
+          const zoneIntruders = unknownPersons.filter((p) => p.in_zone);
+          const activePersonThreatCount = showZoneRef.current ? zoneIntruders.length : unknownPersons.length;
+          setClientUnknownPersonCount(activePersonThreatCount);
           setClientUnknownVehicleCount(unknownVehicles.length);
 
-          const hasIntrusion = Boolean(res.has_intrusion);
+          const hasIntrusion = Boolean(res.has_intrusion) || (showZoneRef.current && zoneIntruders.length > 0);
           setClientHasIntrusion(hasIntrusion);
 
           if (res.telemetry) {
@@ -1917,7 +1922,9 @@ export default function LiveVideoFeed({
                 ? 'CAMERA OFF'
                 : streamMode === 'browser_webcam'
                 ? (clientUnknownPersonCount > 0
-                  ? `UNKNOWN PERSON IN AREA (${clientUnknownPersonCount})`
+                  ? (showZone
+                    ? `ZONE INTRUSION: UNKNOWN PERSON (${clientUnknownPersonCount})`
+                    : `UNKNOWN PERSON IN AREA (${clientUnknownPersonCount})`)
                   : clientUnknownVehicleCount > 0
                   ? `UNKNOWN VEHICLE IN AREA (${clientUnknownVehicleCount})`
                   : clientHasIntrusion
