@@ -186,7 +186,7 @@ export default function SnapshotModal({ event, onClose }) {
           >
             <Eye size={16} style={{ color: '#22d3ee', flexShrink: 0 }} />
             <span>
-              <strong>Ethical Demo Disclaimer:</strong> Facial identification evaluates strictly against a local, consented demo watchlist of authorized team members for SIH demonstration. It is <em>not connected</em> to any external government database.
+              <strong>Ethical Demo Disclaimer:</strong> Facial identification evaluates strictly against a local, consented demo watchlist of authorized team members for demonstration. It is <em>not connected</em> to any external government database.
             </span>
           </div>
 

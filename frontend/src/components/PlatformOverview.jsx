@@ -25,7 +25,6 @@ import {
   Compass,
   TrendingUp,
   FileCheck,
-  Zap,
   Crosshair,
   Activity,
   Video,
@@ -290,11 +289,6 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
       <section className="hero-section">
         <div className="hero-inner">
           <div className="hero-content">
-            <div className="hero-badge">
-              <Zap size={14} />
-              <span>Smart India Hackathon • Border Security Edition</span>
-            </div>
-
             <h1 className="hero-title">
               Turn Border Video into <span className="highlight-text">Actionable Tactical Intelligence</span>
             </h1>
@@ -1062,9 +1056,6 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
                   <span className="brand-name" style={{ color: '#ffffff', fontSize: '1.4rem', fontWeight: 900, letterSpacing: '0.06em', textShadow: '0 2px 10px rgba(56, 189, 248, 0.35)' }}>
                     IBVAP
                   </span>
-                  <span className="brand-sub" style={{ color: '#38bdf8', fontWeight: 600, fontSize: '0.8rem', letterSpacing: '0.02em' }}>
-                    Smart India Hackathon 2026
-                  </span>
                 </div>
               </div>
               <p className="footer-brand-desc">
@@ -1111,7 +1102,7 @@ export default function PlatformOverview({ onLaunchCommandCenter, onLoginClick, 
           <div className="footer-bottom-bar">
             <div className="section-container bottom-inner">
               <div className="copy-text">
-                © 2026 IBVAP. Smart India Hackathon Defense Technology Initiative. All Rights Reserved.
+                © 2026 IBVAP. All Rights Reserved.
               </div>
               <div className="bottom-tag">
                 High-Reliability Border Surveillance Architecture

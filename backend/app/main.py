@@ -264,7 +264,7 @@ class EscalationConfigRequest(BaseModel):
 
 app = FastAPI(
     title="IBVAP - Intelligent Border Video Analytics Platform",
-    description="Smart India Hackathon 2026 - Video Analytics API & Real-Time Event Engine",
+    description="Video Analytics API & Real-Time Event Engine",
     version="1.0.0",
 )
 
