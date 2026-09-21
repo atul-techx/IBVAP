@@ -11,7 +11,7 @@ government, law-enforcement, or public biometric identity database.
 """
 
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, List
 import cv2
 import numpy as np
 
@@ -73,7 +73,7 @@ class WatchlistFaceRecognizer:
         self,
         watchlist_dir: Optional[Path] = None,
         models_dir: Optional[Path] = None,
-        cosine_threshold: float = 0.48,
+        cosine_threshold: float = 0.53,
     ):
         self.cosine_threshold = cosine_threshold
         if watchlist_dir is None:
@@ -210,7 +210,15 @@ class WatchlistFaceRecognizer:
             else:
                 crop_to_use = crop_enh
 
-            best_face = max(faces, key=lambda f: f[14])
+            if len(faces) > 1:
+                # Rank faces by combination of detection score and proximity to horizontal center of person crop
+                best_face = max(
+                    faces,
+                    key=lambda f: float(f[14]) - 0.7 * (abs((float(f[0]) + float(f[2]) / 2.0) - cw / 2.0) / max(1.0, cw))
+                )
+            else:
+                best_face = faces[0]
+
             det_score = float(best_face[14])
             if det_score < 0.28:
                 return None, 0.0, None
@@ -248,25 +256,26 @@ class WatchlistFaceRecognizer:
             scores = []
             for name, ref_feat in self.watchlist_embeddings.items():
                 sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
-                scores.append((sim, name))
+                l2_dist = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_NORM_L2))
+                scores.append((sim, l2_dist, name))
 
             scores.sort(key=lambda s: s[0], reverse=True)
-            best_sim, best_candidate = scores[0]
+            best_sim, best_l2, best_candidate = scores[0]
             second_sim = scores[1][0] if len(scores) > 1 else 0.0
 
             # Biometric Precision Safeguards:
-            # Enforce strict cosine threshold (>= 0.46 under all conditions, default 0.48)
-            # Never decay threshold into false positive territory (0.34 - 0.38)
-            required_thresh = max(0.46, self.cosine_threshold)
-            if fw < 22.0 or fh < 22.0:
-                required_thresh = max(required_thresh, 0.50)
+            # Enforce strict cosine threshold (>= 0.53 under all conditions)
+            required_thresh = max(0.53, self.cosine_threshold)
+            if fw < 24.0 or fh < 24.0:
+                required_thresh = max(required_thresh, 0.55)
 
-            # Strict ambiguity margin check: require clear lead over 2nd candidate
+            # Strict dual-metric and ambiguity margin check:
+            # Requires Cosine similarity >= required_thresh AND L2 distance <= 0.965
             if len(scores) > 1:
                 margin = best_sim - second_sim
-                is_confident_match = (best_sim >= required_thresh) and (margin >= 0.04 or best_sim >= 0.55)
+                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 0.965) and (margin >= 0.04 or best_sim >= 0.58)
             else:
-                is_confident_match = (best_sim >= required_thresh)
+                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 0.965)
 
             if is_confident_match:
                 best_name = best_candidate
@@ -280,9 +289,114 @@ class WatchlistFaceRecognizer:
                     best_name = "UNKNOWN"
                     best_sim = 0.0
 
-            return best_name, round(best_sim, 3), face_coords
+            return best_name, round(best_sim, 3) if best_name != "UNKNOWN" else 0.0, face_coords
         except Exception:
             return None, 0.0, None
+
+    def identify_faces_for_person_boxes(
+        self, frame: np.ndarray, person_bboxes: List[Tuple[int, int, int, int]]
+    ) -> List[Tuple[Optional[str], float, Optional[list[float]]]]:
+        """
+        Joint multi-person face identification for frames containing multiple people.
+        Runs full-frame YuNet detection once, maps each person's upper body to the closest face,
+        guarantees 1-to-1 face assignment, and evaluates embeddings with dual-metric safeguards.
+        Falls back to crop-based identification if a person didn't get a face in full-frame detection.
+        """
+        if not person_bboxes:
+            return []
+        if self.detector is None:
+            return [(None, 0.0, None) for _ in person_bboxes]
+
+        h, w = frame.shape[:2]
+        try:
+            self.detector.setInputSize((w, h))
+            _, all_faces = self.detector.detect(frame)
+        except Exception:
+            all_faces = None
+
+        if all_faces is None or len(all_faces) == 0:
+            # Fallback: run per-crop identification
+            return [self.identify_face_in_person_crop(frame, bbox) for bbox in person_bboxes]
+
+        # Filter valid faces
+        valid_faces = []
+        for fi, face in enumerate(all_faces):
+            if float(face[14]) >= 0.30 and float(face[2]) >= 16.0 and float(face[3]) >= 16.0:
+                valid_faces.append((fi, face))
+
+        results: List[Optional[Tuple[Optional[str], float, Optional[list[float]]]]] = [None] * len(person_bboxes)
+        used_face_indices = set()
+
+        # Step 1: Assign faces to person bounding boxes
+        for p_idx, bbox in enumerate(person_bboxes):
+            bx1, by1, bx2, by2 = map(int, bbox)
+            bw = bx2 - bx1
+            bh = by2 - by1
+            if bw < 18 or bh < 35:
+                continue
+
+            bcx = (bx1 + bx2) / 2.0
+            upper_by2 = by1 + int(bh * 0.65)
+
+            candidates = []
+            for fi, face in valid_faces:
+                if fi in used_face_indices:
+                    continue
+                fcx = float(face[0]) + float(face[2]) / 2.0
+                fcy = float(face[1]) + float(face[3]) / 2.0
+                # Face center must be inside or immediately adjacent to person's upper body
+                if (bx1 - 15 <= fcx <= bx2 + 15) and (by1 - 15 <= fcy <= upper_by2):
+                    dist_to_center = abs(fcx - bcx)
+                    candidates.append((dist_to_center, fi, face))
+
+            if candidates:
+                candidates.sort(key=lambda c: c[0])
+                best_fi, best_face = candidates[0][1], candidates[0][2]
+                used_face_indices.add(best_fi)
+
+                fx, fy, fw, fh = float(best_face[0]), float(best_face[1]), float(best_face[2]), float(best_face[3])
+                abs_fcoords = [round(fx, 1), round(fy, 1), round(fx + fw, 1), round(fy + fh, 1)]
+
+                if not self.recognizer or not self.watchlist_embeddings:
+                    results[p_idx] = ("UNKNOWN", 0.0, abs_fcoords)
+                    continue
+
+                aligned = self.recognizer.alignCrop(frame, best_face)
+                feat = self.recognizer.feature(aligned)
+
+                scores = []
+                for name, ref_feat in self.watchlist_embeddings.items():
+                    sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
+                    l2_dist = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_NORM_L2))
+                    scores.append((sim, l2_dist, name))
+
+                scores.sort(key=lambda s: s[0], reverse=True)
+                best_sim, best_l2, best_candidate = scores[0]
+                second_sim = scores[1][0] if len(scores) > 1 else 0.0
+
+                required_thresh = max(0.53, self.cosine_threshold)
+                if fw < 24.0 or fh < 24.0:
+                    required_thresh = max(required_thresh, 0.55)
+
+                if len(scores) > 1:
+                    margin = best_sim - second_sim
+                    is_confident = (best_sim >= required_thresh) and (best_l2 <= 0.965) and (margin >= 0.04 or best_sim >= 0.58)
+                else:
+                    is_confident = (best_sim >= required_thresh) and (best_l2 <= 0.965)
+
+                best_name = best_candidate if is_confident else "UNKNOWN"
+                if best_name != "UNKNOWN" and not check_watchlist_person_active(best_name):
+                    best_name = "UNKNOWN"
+                    best_sim = 0.0
+
+                results[p_idx] = (best_name, round(best_sim, 3) if best_name != "UNKNOWN" else 0.0, abs_fcoords)
+
+        # Step 2: For any person that didn't get matched via full frame, use per-crop fallback
+        for p_idx, bbox in enumerate(person_bboxes):
+            if results[p_idx] is None:
+                results[p_idx] = self.identify_face_in_person_crop(frame, bbox)
+
+        return results
 
 
 _global_watchlist_recognizer: Optional[WatchlistFaceRecognizer] = None

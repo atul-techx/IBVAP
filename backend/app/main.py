@@ -1743,7 +1743,28 @@ async def process_client_frame(
             boxes = results.boxes
             if boxes is not None and len(boxes) > 0:
                 recognizer = get_active_face_recognizer()
-                for box in boxes:
+
+                # Pre-identify faces across all detected persons in the frame to prevent identity stealing & overlapping crop misassignment
+                person_indices = []
+                person_bboxes = []
+                for b_idx, box in enumerate(boxes):
+                    cls_id = int(box.cls[0])
+                    cls_name = model.names.get(cls_id, f"class_{cls_id}")
+                    if cls_name == "person":
+                        xyxy = box.xyxy[0].tolist()
+                        person_indices.append(b_idx)
+                        person_bboxes.append(tuple(int(v) for v in xyxy))
+
+                person_face_results = {}
+                if recognizer is not None and person_bboxes:
+                    try:
+                        joint_results = recognizer.identify_faces_for_person_boxes(frame, person_bboxes)
+                        for b_idx, res in zip(person_indices, joint_results):
+                            person_face_results[b_idx] = res
+                    except Exception as pfe:
+                        print(f"[!] Joint face identification error: {pfe}")
+
+                for box_idx, box in enumerate(boxes):
                     cls_id = int(box.cls[0])
                     conf = float(box.conf[0])
                     xyxy = box.xyxy[0].tolist()
@@ -1779,20 +1800,24 @@ async def process_client_frame(
                     if cls_name == "person":
                         if recognizer is not None:
                             try:
-                                f_ident, f_conf, f_coords = recognizer.identify_face_in_person_crop(
-                                    frame, (x1, y1, x2, y2)
-                                )
+                                face_res = person_face_results.get(box_idx)
+                                if face_res:
+                                    f_ident, f_conf, f_coords = face_res
+                                else:
+                                    f_ident, f_conf, f_coords = recognizer.identify_face_in_person_crop(
+                                        frame, (x1, y1, x2, y2)
+                                    )
                                 if f_coords:
                                     face_bbox = f_coords
 
                                 if track_id not in _CLIENT_TRACK_FACE_HISTORY:
                                     _CLIENT_TRACK_FACE_HISTORY[track_id] = deque(maxlen=8)
 
-                                if f_ident and f_ident != "UNKNOWN" and f_conf >= 0.46:
+                                if f_ident and f_ident != "UNKNOWN" and f_conf >= 0.52:
                                     _CLIENT_TRACK_FACE_HISTORY[track_id].append((t0, f_ident, f_conf))
-                                    # Multi-frame consensus: Require 2 consistent matches in last 3.5s or confident single match >= 0.60
+                                    # Multi-frame consensus: Confident single match >= 0.53 or 2 consistent matches in last 3.5s
                                     recent_same = [c for ts, n, c in _CLIENT_TRACK_FACE_HISTORY[track_id] if n == f_ident and (t0 - ts) <= 3.5]
-                                    if len(recent_same) >= 2 or f_conf >= 0.60:
+                                    if len(recent_same) >= 2 or f_conf >= 0.53:
                                         avg_c = sum(recent_same) / len(recent_same)
                                         identified_as = f_ident
                                         face_conf = avg_c
@@ -1808,8 +1833,8 @@ async def process_client_frame(
                                 elif f_ident == "UNKNOWN":
                                     unknown_cnt = _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) + 1
                                     _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = unknown_cnt
-                                    if unknown_cnt >= 2:
-                                        # Two consecutive UNKNOWN frames -> evict cached authorized identity immediately
+                                    if unknown_cnt >= 4:
+                                        # 4 consecutive UNKNOWN frames -> evict cached authorized identity
                                         _CLIENT_TRACK_IDENTITIES.pop(track_id, None)
                                         if track_id in _CLIENT_TRACK_FACE_HISTORY:
                                             _CLIENT_TRACK_FACE_HISTORY[track_id].clear()
@@ -1819,7 +1844,7 @@ async def process_client_frame(
                                 pass
 
                         # Temporal Track Identity Smoothing (at most 3.0s, only if no consecutive UNKNOWNs)
-                        if not identified_as and _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) < 2:
+                        if not identified_as and _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) < 3:
                             cached_ident = _CLIENT_TRACK_IDENTITIES.get(track_id)
                             if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 3.0):
                                 identified_as = cached_ident["identity"]
@@ -1897,12 +1922,13 @@ async def process_client_frame(
 
     # Check for unknown persons or unauthorized vehicles
     # Only flag unknown person if NOT authorized AND persistently unverified across multiple frames
+    # When virtual fence is active (req.show_zone is True), only alert if person is inside the fence (in_zone)
     has_unknown_person = any(
         d["class_name"] == "person"
         and not d.get("is_authorized_person")
         and not d.get("is_authorized")
         and (not d.get("identified_as") or d.get("identified_as") == "UNKNOWN")
-        and (d.get("in_zone") or _CLIENT_TRACK_UNKNOWN_FRAMES.get(d["track_id"], 0) >= 6)
+        and (d.get("in_zone") if req.show_zone else (_CLIENT_TRACK_UNKNOWN_FRAMES.get(d["track_id"], 0) >= 6))
         for d in detections
     )
     has_unknown_vehicle = any(
