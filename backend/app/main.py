@@ -1813,11 +1813,11 @@ async def process_client_frame(
                                 if track_id not in _CLIENT_TRACK_FACE_HISTORY:
                                     _CLIENT_TRACK_FACE_HISTORY[track_id] = deque(maxlen=8)
 
-                                if f_ident and f_ident != "UNKNOWN" and f_conf >= 0.52:
+                                if f_ident and f_ident != "UNKNOWN" and f_conf >= 0.38:
                                     _CLIENT_TRACK_FACE_HISTORY[track_id].append((t0, f_ident, f_conf))
-                                    # Multi-frame consensus: Confident single match >= 0.53 or 2 consistent matches in last 3.5s
+                                    # Multi-frame consensus: Confident single match >= 0.42 or 2 consistent matches in last 3.5s
                                     recent_same = [c for ts, n, c in _CLIENT_TRACK_FACE_HISTORY[track_id] if n == f_ident and (t0 - ts) <= 3.5]
-                                    if len(recent_same) >= 2 or f_conf >= 0.53:
+                                    if len(recent_same) >= 2 or f_conf >= 0.42:
                                         avg_c = sum(recent_same) / len(recent_same)
                                         identified_as = f_ident
                                         face_conf = avg_c
@@ -1833,8 +1833,8 @@ async def process_client_frame(
                                 elif f_ident == "UNKNOWN":
                                     unknown_cnt = _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) + 1
                                     _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = unknown_cnt
-                                    if unknown_cnt >= 4:
-                                        # 4 consecutive UNKNOWN frames -> evict cached authorized identity
+                                    if unknown_cnt >= 8:
+                                        # 8 consecutive UNKNOWN frames (~2.5s) -> evict cached authorized identity
                                         _CLIENT_TRACK_IDENTITIES.pop(track_id, None)
                                         if track_id in _CLIENT_TRACK_FACE_HISTORY:
                                             _CLIENT_TRACK_FACE_HISTORY[track_id].clear()
@@ -1843,10 +1843,10 @@ async def process_client_frame(
                             except Exception:
                                 pass
 
-                        # Temporal Track Identity Smoothing (at most 3.0s, only if no consecutive UNKNOWNs)
-                        if not identified_as and _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) < 3:
+                        # Temporal Track Identity Smoothing (at most 4.0s, only if no prolonged consecutive UNKNOWNs)
+                        if not identified_as and _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) < 8:
                             cached_ident = _CLIENT_TRACK_IDENTITIES.get(track_id)
-                            if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 3.0):
+                            if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 4.0):
                                 identified_as = cached_ident["identity"]
                                 face_conf = cached_ident.get("face_conf", face_conf)
                                 is_auth_person = cached_ident.get("is_authorized", False)

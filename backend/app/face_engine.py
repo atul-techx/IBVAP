@@ -73,7 +73,7 @@ class WatchlistFaceRecognizer:
         self,
         watchlist_dir: Optional[Path] = None,
         models_dir: Optional[Path] = None,
-        cosine_threshold: float = 0.53,
+        cosine_threshold: float = 0.40,
     ):
         self.cosine_threshold = cosine_threshold
         if watchlist_dir is None:
@@ -264,18 +264,17 @@ class WatchlistFaceRecognizer:
             second_sim = scores[1][0] if len(scores) > 1 else 0.0
 
             # Biometric Precision Safeguards:
-            # Enforce strict cosine threshold (>= 0.53 under all conditions)
-            required_thresh = max(0.53, self.cosine_threshold)
+            # Enforce balanced cosine threshold (>= 0.40) & L2 distance <= 1.08 with margin check
+            required_thresh = max(0.40, self.cosine_threshold)
             if fw < 24.0 or fh < 24.0:
-                required_thresh = max(required_thresh, 0.55)
+                required_thresh = max(required_thresh, 0.42)
 
             # Strict dual-metric and ambiguity margin check:
-            # Requires Cosine similarity >= required_thresh AND L2 distance <= 0.965
             if len(scores) > 1:
                 margin = best_sim - second_sim
-                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 0.965) and (margin >= 0.04 or best_sim >= 0.58)
+                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 1.08) and (margin >= 0.05 or best_sim >= 0.52)
             else:
-                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 0.965)
+                is_confident_match = (best_sim >= required_thresh) and (best_l2 <= 1.08)
 
             if is_confident_match:
                 best_name = best_candidate
@@ -321,13 +320,15 @@ class WatchlistFaceRecognizer:
         # Filter valid faces
         valid_faces = []
         for fi, face in enumerate(all_faces):
-            if float(face[14]) >= 0.30 and float(face[2]) >= 16.0 and float(face[3]) >= 16.0:
+            if float(face[14]) >= 0.28 and float(face[2]) >= 16.0 and float(face[3]) >= 16.0:
                 valid_faces.append((fi, face))
 
         results: List[Optional[Tuple[Optional[str], float, Optional[list[float]]]]] = [None] * len(person_bboxes)
         used_face_indices = set()
+        used_person_indices = set()
 
-        # Step 1: Assign faces to person bounding boxes
+        # Step 1: Globally optimal distance-based face-to-person assignment
+        assignment_pairs = []
         for p_idx, bbox in enumerate(person_bboxes):
             bx1, by1, bx2, by2 = map(int, bbox)
             bw = bx2 - bx1
@@ -336,60 +337,60 @@ class WatchlistFaceRecognizer:
                 continue
 
             bcx = (bx1 + bx2) / 2.0
-            upper_by2 = by1 + int(bh * 0.65)
+            bcy_upper = by1 + int(bh * 0.35)
+            upper_by2 = by1 + int(bh * 0.70)
 
-            candidates = []
             for fi, face in valid_faces:
-                if fi in used_face_indices:
-                    continue
                 fcx = float(face[0]) + float(face[2]) / 2.0
                 fcy = float(face[1]) + float(face[3]) / 2.0
-                # Face center must be inside or immediately adjacent to person's upper body
-                if (bx1 - 15 <= fcx <= bx2 + 15) and (by1 - 15 <= fcy <= upper_by2):
-                    dist_to_center = abs(fcx - bcx)
-                    candidates.append((dist_to_center, fi, face))
+                # Face center must fall in or close to person's upper body corridor
+                if (bx1 - 25 <= fcx <= bx2 + 25) and (by1 - 25 <= fcy <= upper_by2):
+                    dist = ((fcx - bcx) ** 2 + (fcy - bcy_upper) ** 2) ** 0.5
+                    assignment_pairs.append((dist, p_idx, fi, face))
 
-            if candidates:
-                candidates.sort(key=lambda c: c[0])
-                best_fi, best_face = candidates[0][1], candidates[0][2]
-                used_face_indices.add(best_fi)
+        assignment_pairs.sort(key=lambda a: a[0])
+        for dist, p_idx, fi, face in assignment_pairs:
+            if p_idx in used_person_indices or fi in used_face_indices:
+                continue
+            used_person_indices.add(p_idx)
+            used_face_indices.add(fi)
 
-                fx, fy, fw, fh = float(best_face[0]), float(best_face[1]), float(best_face[2]), float(best_face[3])
-                abs_fcoords = [round(fx, 1), round(fy, 1), round(fx + fw, 1), round(fy + fh, 1)]
+            fx, fy, fw, fh = float(face[0]), float(face[1]), float(face[2]), float(face[3])
+            abs_fcoords = [round(fx, 1), round(fy, 1), round(fx + fw, 1), round(fy + fh, 1)]
 
-                if not self.recognizer or not self.watchlist_embeddings:
-                    results[p_idx] = ("UNKNOWN", 0.0, abs_fcoords)
-                    continue
+            if not self.recognizer or not self.watchlist_embeddings:
+                results[p_idx] = ("UNKNOWN", 0.0, abs_fcoords)
+                continue
 
-                aligned = self.recognizer.alignCrop(frame, best_face)
-                feat = self.recognizer.feature(aligned)
+            aligned = self.recognizer.alignCrop(frame, face)
+            feat = self.recognizer.feature(aligned)
 
-                scores = []
-                for name, ref_feat in self.watchlist_embeddings.items():
-                    sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
-                    l2_dist = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_NORM_L2))
-                    scores.append((sim, l2_dist, name))
+            scores = []
+            for name, ref_feat in self.watchlist_embeddings.items():
+                sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
+                l2_dist = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_NORM_L2))
+                scores.append((sim, l2_dist, name))
 
-                scores.sort(key=lambda s: s[0], reverse=True)
-                best_sim, best_l2, best_candidate = scores[0]
-                second_sim = scores[1][0] if len(scores) > 1 else 0.0
+            scores.sort(key=lambda s: s[0], reverse=True)
+            best_sim, best_l2, best_candidate = scores[0]
+            second_sim = scores[1][0] if len(scores) > 1 else 0.0
 
-                required_thresh = max(0.53, self.cosine_threshold)
-                if fw < 24.0 or fh < 24.0:
-                    required_thresh = max(required_thresh, 0.55)
+            required_thresh = max(0.40, self.cosine_threshold)
+            if fw < 24.0 or fh < 24.0:
+                required_thresh = max(required_thresh, 0.42)
 
-                if len(scores) > 1:
-                    margin = best_sim - second_sim
-                    is_confident = (best_sim >= required_thresh) and (best_l2 <= 0.965) and (margin >= 0.04 or best_sim >= 0.58)
-                else:
-                    is_confident = (best_sim >= required_thresh) and (best_l2 <= 0.965)
+            if len(scores) > 1:
+                margin = best_sim - second_sim
+                is_confident = (best_sim >= required_thresh) and (best_l2 <= 1.08) and (margin >= 0.05 or best_sim >= 0.52)
+            else:
+                is_confident = (best_sim >= required_thresh) and (best_l2 <= 1.08)
 
-                best_name = best_candidate if is_confident else "UNKNOWN"
-                if best_name != "UNKNOWN" and not check_watchlist_person_active(best_name):
-                    best_name = "UNKNOWN"
-                    best_sim = 0.0
+            best_name = best_candidate if is_confident else "UNKNOWN"
+            if best_name != "UNKNOWN" and not check_watchlist_person_active(best_name):
+                best_name = "UNKNOWN"
+                best_sim = 0.0
 
-                results[p_idx] = (best_name, round(best_sim, 3) if best_name != "UNKNOWN" else 0.0, abs_fcoords)
+            results[p_idx] = (best_name, round(best_sim, 3) if best_name != "UNKNOWN" else 0.0, abs_fcoords)
 
         # Step 2: For any person that didn't get matched via full frame, use per-crop fallback
         for p_idx, bbox in enumerate(person_bboxes):
