@@ -591,7 +591,7 @@ def validate_indian_plate_grammar(plate_str: Optional[str]) -> Dict[str, Any]:
 
 class MultiFramePlateVoter:
     """
-    Temporal multi-frame voting consensus engine for ANPR (SIH PS 26187 Item 4).
+    Temporal multi-frame voting consensus engine for ANPR.
     Accumulates OCR candidate readings per tracked vehicle across consecutive frames
     to eliminate single-frame OCR noise, motion blur, and specular glare.
     
@@ -1011,7 +1011,7 @@ class SuspiciousBehaviorDetector:
 
     def is_foliage_or_wind(self, tracker_id: int) -> bool:
         """
-        Foliage / Wind False-Positive Filter (SIH PS 26187 Item 16):
+        Foliage / Wind False-Positive Filter:
         Detects if a track exhibits high-frequency spatial oscillation around a stationary anchor
         (typical of wind-blown branches/bushes) with negligible net displacement over 25+ frames.
         """
@@ -1036,7 +1036,7 @@ class SuspiciousBehaviorDetector:
 
 class OpticalTamperDetector:
     """
-    Real-Time Optical Camera Tampering Detection Engine (SIH PS 26187 Item 17).
+    Real-Time Optical Camera Tampering Detection Engine.
     Detects 3 core sabotage / failure vectors:
     1. Lens Occlusion / Spray / Covered: Screen plunged into pitch darkness or flat uniform color.
     2. Blinding / Laser / Directed High-Beam: Extreme saturation over-exposure across sensor.

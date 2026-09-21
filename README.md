@@ -5,7 +5,7 @@
 # 🛡️ IBVAP – Intelligent Border Video Analytics Platform
 
 ### **Next-Generation Autonomous Multi-Camera AI Surveillance & Tactical Command System**
-*Engineered for Smart India Hackathon (SIH) 2026*
+*Engineered for Defense & Border Security Operations*
 
 <br/>
 
@@ -531,7 +531,7 @@ python backend/app/test_e2e_admin_phase_a.py
 
 ### 4. Real-Time Git Auto-Sync
 
-For multi-developer hackathon environments:
+For multi-developer collaborative environments:
 - **1-Click Auto-Sync**: Double-click [`auto_git_sync.bat`](file:///c:/Users/atulg/OneDrive/Desktop/IBVAP/auto_git_sync.bat) to continuously watch and sync.
 - **Immediate Push**: Double-click [`sync_now.bat`](file:///c:/Users/atulg/OneDrive/Desktop/IBVAP/sync_now.bat) to commit and push changes immediately.
 
@@ -574,7 +574,7 @@ For multi-developer hackathon environments:
 
 <div align="center">
 
-**Developed for Smart India Hackathon (SIH) 2026**<br>
+**Autonomous Tactical Border Surveillance System**<br>
 <i>Engineered with precision for secure, intelligent, and tamper-evident border surveillance.</i>
 
 [![GitHub Stars](https://img.shields.io/github/stars/atul-techx/IBVAP?style=social)](https://github.com/atul-techx/IBVAP)
