@@ -73,7 +73,7 @@ class WatchlistFaceRecognizer:
         self,
         watchlist_dir: Optional[Path] = None,
         models_dir: Optional[Path] = None,
-        cosine_threshold: float = 0.38,
+        cosine_threshold: float = 0.48,
     ):
         self.cosine_threshold = cosine_threshold
         if watchlist_dir is None:
@@ -240,51 +240,33 @@ class WatchlistFaceRecognizer:
             if not self.recognizer or not self.watchlist_embeddings:
                 return "UNKNOWN", 0.0, face_coords
 
-            # Dual-embedding extraction in low-light / night conditions:
-            # Evaluate both illumination-normalized and raw crops against reference photos
-            aligned_enh = self.recognizer.alignCrop(crop_enh, best_face)
-            feat_enh = self.recognizer.feature(aligned_enh)
-
-            feat_raw = None
-            if is_low_light:
-                try:
-                    aligned_raw = self.recognizer.alignCrop(crop, best_face)
-                    feat_raw = self.recognizer.feature(aligned_raw)
-                except Exception:
-                    feat_raw = None
+            # Extract 128-d biometric feature vector from aligned crop
+            aligned = self.recognizer.alignCrop(crop_to_use, best_face)
+            feat = self.recognizer.feature(aligned)
 
             # Compute similarities against all registered watchlist identities
             scores = []
             for name, ref_feat in self.watchlist_embeddings.items():
-                sim_enh = float(self.recognizer.match(feat_enh, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
-                if feat_raw is not None:
-                    sim_raw = float(self.recognizer.match(feat_raw, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
-                    sim = max(sim_enh, sim_raw)
-                else:
-                    sim = sim_enh
+                sim = float(self.recognizer.match(feat, ref_feat, cv2.FaceRecognizerSF_FR_COSINE))
                 scores.append((sim, name))
 
             scores.sort(key=lambda s: s[0], reverse=True)
             best_sim, best_candidate = scores[0]
             second_sim = scores[1][0] if len(scores) > 1 else 0.0
 
-            # Adaptive dynamic thresholding based on ambient illumination & face size
-            if is_low_light:
-                base_thresh = 0.34
-            elif crop_mean_luma < 120.0:
-                base_thresh = 0.36
+            # Biometric Precision Safeguards:
+            # Enforce strict cosine threshold (>= 0.46 under all conditions, default 0.48)
+            # Never decay threshold into false positive territory (0.34 - 0.38)
+            required_thresh = max(0.46, self.cosine_threshold)
+            if fw < 22.0 or fh < 22.0:
+                required_thresh = max(required_thresh, 0.50)
+
+            # Strict ambiguity margin check: require clear lead over 2nd candidate
+            if len(scores) > 1:
+                margin = best_sim - second_sim
+                is_confident_match = (best_sim >= required_thresh) and (margin >= 0.04 or best_sim >= 0.55)
             else:
-                base_thresh = self.cosine_threshold
-
-            required_thresh = base_thresh
-            if fw < 20.0 or fh < 20.0:
-                required_thresh = max(required_thresh, base_thresh + 0.02)
-
-            # Separation Margin: confirmed match if clear lead over 2nd profile or high single score
-            margin = best_sim - second_sim
-            is_confident_match = (best_sim >= required_thresh) and (
-                margin >= 0.025 or best_sim >= 0.45 or len(scores) <= 1
-            )
+                is_confident_match = (best_sim >= required_thresh)
 
             if is_confident_match:
                 best_name = best_candidate
@@ -315,7 +297,7 @@ def get_watchlist_recognizer(reload: bool = False) -> Optional[WatchlistFaceReco
             _global_watchlist_recognizer = WatchlistFaceRecognizer(
                 watchlist_dir=backend_dir / "watchlist",
                 models_dir=backend_dir / "models",
-                cosine_threshold=0.38,
+                cosine_threshold=0.48,
             )
         except Exception:
             pass

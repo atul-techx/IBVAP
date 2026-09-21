@@ -41,7 +41,6 @@ backend/test_*.db
 backend/live_frame_*.jpg
 backend/snapshots/
 backend/test_data/
-backend/watchlist/
 backend/test_videos/annotated_*.mp4
 backend/test_videos/output_*.mp4
 backend/test_videos/upload_*.mp4

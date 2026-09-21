@@ -23,6 +23,7 @@ import threading
 import time
 import re
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1651,6 +1652,7 @@ def get_client_yolo_model():
 # Track identity memory cache for client browser webcam AI loop (smooths face recognition across frames)
 _CLIENT_TRACK_IDENTITIES: Dict[int, Dict[str, Any]] = {}
 _CLIENT_TRACK_UNKNOWN_FRAMES: Dict[int, int] = {}
+_CLIENT_TRACK_FACE_HISTORY: Dict[int, deque] = {}
 
 
 def is_person_authorized(name: Optional[str]) -> bool:
@@ -1782,33 +1784,50 @@ async def process_client_frame(
                                 )
                                 if f_coords:
                                     face_bbox = f_coords
-                                if f_ident and f_ident != "UNKNOWN":
-                                    identified_as = f_ident
-                                    face_conf = f_conf
-                                    is_auth_person = is_person_authorized(f_ident)
-                                    _CLIENT_TRACK_IDENTITIES[track_id] = {
-                                        "identity": f_ident,
-                                        "is_authorized": is_auth_person,
-                                        "last_seen": t0,
-                                        "face_conf": f_conf,
-                                        "face_bbox": f_coords,
-                                    }
-                                    _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = 0
+
+                                if track_id not in _CLIENT_TRACK_FACE_HISTORY:
+                                    _CLIENT_TRACK_FACE_HISTORY[track_id] = deque(maxlen=8)
+
+                                if f_ident and f_ident != "UNKNOWN" and f_conf >= 0.46:
+                                    _CLIENT_TRACK_FACE_HISTORY[track_id].append((t0, f_ident, f_conf))
+                                    # Multi-frame consensus: Require 2 consistent matches in last 3.5s or confident single match >= 0.60
+                                    recent_same = [c for ts, n, c in _CLIENT_TRACK_FACE_HISTORY[track_id] if n == f_ident and (t0 - ts) <= 3.5]
+                                    if len(recent_same) >= 2 or f_conf >= 0.60:
+                                        avg_c = sum(recent_same) / len(recent_same)
+                                        identified_as = f_ident
+                                        face_conf = avg_c
+                                        is_auth_person = is_person_authorized(f_ident)
+                                        _CLIENT_TRACK_IDENTITIES[track_id] = {
+                                            "identity": f_ident,
+                                            "is_authorized": is_auth_person,
+                                            "last_seen": t0,
+                                            "face_conf": avg_c,
+                                            "face_bbox": f_coords,
+                                        }
+                                        _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = 0
                                 elif f_ident == "UNKNOWN":
-                                    _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) + 1
+                                    unknown_cnt = _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) + 1
+                                    _CLIENT_TRACK_UNKNOWN_FRAMES[track_id] = unknown_cnt
+                                    if unknown_cnt >= 2:
+                                        # Two consecutive UNKNOWN frames -> evict cached authorized identity immediately
+                                        _CLIENT_TRACK_IDENTITIES.pop(track_id, None)
+                                        if track_id in _CLIENT_TRACK_FACE_HISTORY:
+                                            _CLIENT_TRACK_FACE_HISTORY[track_id].clear()
+                                        identified_as = "UNKNOWN"
+                                        is_auth_person = False
                             except Exception:
                                 pass
 
-                        # Temporal Track Identity Smoothing:
-                        # If face is momentarily occluded or angled away in this frame, retain positive identification
-                        cached_ident = _CLIENT_TRACK_IDENTITIES.get(track_id)
-                        if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 20.0):
-                            identified_as = cached_ident["identity"]
-                            face_conf = cached_ident.get("face_conf", face_conf)
-                            is_auth_person = cached_ident.get("is_authorized", False)
-                            if not face_bbox:
-                                face_bbox = cached_ident.get("face_bbox")
-                        elif identified_as:
+                        # Temporal Track Identity Smoothing (at most 3.0s, only if no consecutive UNKNOWNs)
+                        if not identified_as and _CLIENT_TRACK_UNKNOWN_FRAMES.get(track_id, 0) < 2:
+                            cached_ident = _CLIENT_TRACK_IDENTITIES.get(track_id)
+                            if cached_ident and (t0 - cached_ident.get("last_seen", 0) <= 3.0):
+                                identified_as = cached_ident["identity"]
+                                face_conf = cached_ident.get("face_conf", face_conf)
+                                is_auth_person = cached_ident.get("is_authorized", False)
+                                if not face_bbox:
+                                    face_bbox = cached_ident.get("face_bbox")
+                        elif identified_as and identified_as != "UNKNOWN":
                             is_auth_person = is_person_authorized(identified_as)
                     elif cls_name in ["car", "bus", "truck", "motorcycle", "vehicle"]:
                         try:
@@ -1848,6 +1867,31 @@ async def process_client_frame(
                         "is_authorized": is_auth_person or is_auth_veh,
                         "vehicle_owner": veh_owner,
                     })
+
+                # Single-Identity Mutual Exclusion per Frame:
+                # A single authorized identity (e.g. "Hardik") can NEVER be multiple distinct people in the same frame!
+                # If multiple detections share the same identity in this frame, only the highest confidence one keeps it.
+                auth_claims: Dict[str, List[int]] = {}
+                for idx, d in enumerate(detections):
+                    ident = d.get("identified_as")
+                    if ident and ident != "UNKNOWN" and d.get("is_authorized_person"):
+                        auth_claims.setdefault(ident, []).append(idx)
+
+                for ident, indices in auth_claims.items():
+                    if len(indices) > 1:
+                        # Multiple people matched the same person in the same frame!
+                        # Keep highest face confidence, demote all others to UNKNOWN
+                        best_idx = max(indices, key=lambda i: detections[i].get("face_confidence") or 0.0)
+                        for i in indices:
+                            if i != best_idx:
+                                demoted_tid = detections[i]["track_id"]
+                                detections[i]["identified_as"] = "UNKNOWN"
+                                detections[i]["is_authorized_person"] = False
+                                detections[i]["is_authorized"] = False
+                                _CLIENT_TRACK_IDENTITIES.pop(demoted_tid, None)
+                                if demoted_tid in _CLIENT_TRACK_FACE_HISTORY:
+                                    _CLIENT_TRACK_FACE_HISTORY[demoted_tid].clear()
+                                _CLIENT_TRACK_UNKNOWN_FRAMES[demoted_tid] = 2
         except Exception as det_err:
             print(f"[!] Warning running client YOLO detection: {det_err}")
 
