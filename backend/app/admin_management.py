@@ -9,6 +9,7 @@ Provides backend database management and validation for:
 import base64
 import csv
 import io
+import json
 import os
 import re
 import sqlite3
@@ -56,6 +57,163 @@ def get_watchlist_dir() -> Path:
     watchlist_dir = backend_dir / "watchlist"
     watchlist_dir.mkdir(parents=True, exist_ok=True)
     return watchlist_dir
+
+
+def get_registry_path() -> Path:
+    """Get path to persistent JSON registry file."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    reg_dir = backend_dir / "data"
+    reg_dir.mkdir(parents=True, exist_ok=True)
+    return reg_dir / "authorized_registry.json"
+
+
+def dump_authorized_registry_to_disk(db_path: Optional[Path] = None) -> bool:
+    """
+    Dump all watchlist personnel (including base64 photo) and authorized vehicles to authorized_registry.json.
+    This guarantees persistence across cloud container redeployments and multi-machine setups.
+    """
+    if db_path is None:
+        db_path = get_default_db_path()
+
+    try:
+        reg_file = get_registry_path()
+        watchlist_dir = get_watchlist_dir()
+        with get_db_connection(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT name, role, photo_filename, image_url, photo_base64, expiry_date, notes FROM watchlist_personnel ORDER BY name ASC")
+            personnel = cur.fetchall_dicts()
+
+            for p in personnel:
+                if not p.get("photo_base64") and p.get("photo_filename"):
+                    p_file = watchlist_dir / p["photo_filename"]
+                    if p_file.exists() and p_file.stat().st_size > 100:
+                        try:
+                            with open(p_file, "rb") as pf:
+                                p["photo_base64"] = base64.b64encode(pf.read()).decode("utf-8")
+                        except Exception:
+                            pass
+
+            cur.execute("SELECT plate_number, owner_name, vehicle_type, purpose, expiry_date, notes FROM authorized_vehicles ORDER BY plate_number ASC")
+            vehicles = cur.fetchall_dicts()
+
+            data = {
+                "version": "2.0",
+                "last_synced": datetime.now(timezone.utc).isoformat(),
+                "personnel": personnel,
+                "vehicles": vehicles,
+            }
+
+            temp_file = reg_file.with_suffix(".tmp")
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            temp_file.replace(reg_file)
+            return True
+    except Exception as e:
+        print(f"[!] Warning dumping authorized registry: {e}")
+        return False
+
+
+def restore_authorized_registry_from_disk(watchlist_dir: Optional[Path] = None, db_path: Optional[Path] = None) -> int:
+    """
+    Restore authorized personnel and vehicles from authorized_registry.json into database and local disk.
+    Ensures zero data loss on fresh containers, new clones, or restarts.
+    """
+    if watchlist_dir is None:
+        watchlist_dir = get_watchlist_dir()
+    watchlist_dir.mkdir(parents=True, exist_ok=True)
+    if db_path is None:
+        db_path = get_default_db_path()
+
+    reg_file = get_registry_path()
+    if not reg_file.exists():
+        return 0
+
+    restored_count = 0
+    try:
+        with open(reg_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with get_db_connection(db_path) as conn:
+            cur = conn.cursor()
+
+            for p in data.get("personnel", []):
+                name = (p.get("name") or "").strip()
+                if not name:
+                    continue
+                photo_filename = p.get("photo_filename") or f"{name.lower().replace(' ', '_')}.jpg"
+                photo_b64 = p.get("photo_base64")
+                image_url = p.get("image_url")
+                target_photo = watchlist_dir / photo_filename
+
+                if (not target_photo.exists() or target_photo.stat().st_size < 100) and photo_b64:
+                    try:
+                        with open(target_photo, "wb") as pf:
+                            pf.write(base64.b64decode(photo_b64))
+                    except Exception as err:
+                        print(f"[!] Warning restoring photo for {name}: {err}")
+
+                cur.execute(
+                    """
+                    INSERT INTO watchlist_personnel
+                    (name, role, photo_filename, image_url, photo_base64, expiry_date, notes, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        role = excluded.role,
+                        photo_filename = excluded.photo_filename,
+                        image_url = COALESCE(excluded.image_url, watchlist_personnel.image_url),
+                        photo_base64 = COALESCE(excluded.photo_base64, watchlist_personnel.photo_base64),
+                        expiry_date = excluded.expiry_date,
+                        notes = excluded.notes,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        name,
+                        p.get("role", "SSB Personnel"),
+                        photo_filename,
+                        image_url,
+                        photo_b64,
+                        p.get("expiry_date"),
+                        p.get("notes"),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                restored_count += 1
+
+            for v in data.get("vehicles", []):
+                plate = (v.get("plate_number") or "").strip().upper()
+                if not plate:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO authorized_vehicles
+                    (plate_number, owner_name, vehicle_type, purpose, expiry_date, notes, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(plate_number) DO UPDATE SET
+                        owner_name = excluded.owner_name,
+                        vehicle_type = excluded.vehicle_type,
+                        purpose = excluded.purpose,
+                        expiry_date = excluded.expiry_date,
+                        notes = excluded.notes,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        plate,
+                        v.get("owner_name", "Authorized Officer"),
+                        v.get("vehicle_type", "Patrol Vehicle"),
+                        v.get("purpose", "Official Duty"),
+                        v.get("expiry_date"),
+                        v.get("notes"),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[!] Warning during restore_authorized_registry_from_disk: {e}")
+
+    return restored_count
 
 
 def normalize_plate(plate_number: Optional[str]) -> str:
@@ -160,6 +318,9 @@ def init_admin_tables(db_path: Optional[Path] = None):
         )
         conn.commit()
 
+        # First, restore any profiles and vehicles saved in persistent authorized_registry.json
+        restore_authorized_registry_from_disk(watchlist_dir=get_watchlist_dir(), db_path=db_path)
+
         # Seed existing photo files from backend/watchlist/ if watchlist_personnel is empty
         cursor.execute("SELECT COUNT(*) FROM watchlist_personnel")
         count_wl = cursor.fetchone()[0]
@@ -224,6 +385,9 @@ def init_admin_tables(db_path: Optional[Path] = None):
                     (plate, owner, vtype, purpose, exp, notes, now_iso, now_iso),
                 )
             conn.commit()
+
+        # Ensure registry JSON on disk is synchronized with current DB
+        dump_authorized_registry_to_disk(db_path=db_path)
 
 def sync_cloud_watchlist_to_disk(watchlist_dir: Optional[Path] = None, db_path: Optional[Path] = None) -> int:
     """
@@ -436,6 +600,7 @@ def add_or_update_watchlist_person(
         )
         conn.commit()
 
+    dump_authorized_registry_to_disk(db_path=db_path)
     return get_watchlist_person(clean_name, db_path=db_path) or {}
 
 
@@ -464,6 +629,7 @@ def delete_watchlist_person(name: str, db_path: Optional[Path] = None) -> bool:
         cursor.execute("DELETE FROM watchlist_personnel WHERE LOWER(name) = LOWER(?)", (clean_name,))
         conn.commit()
 
+    dump_authorized_registry_to_disk(db_path=db_path)
     return True
 
 
@@ -556,6 +722,7 @@ def add_or_update_authorized_vehicle(
         conn.commit()
 
     vehicles = get_all_authorized_vehicles(db_path=db_path)
+    dump_authorized_registry_to_disk(db_path=db_path)
     for v in vehicles:
         if normalize_plate(v["plate_number"]) == normalize_plate(clean_plate):
             return v
@@ -584,6 +751,7 @@ def delete_authorized_vehicle(plate_number: str, db_path: Optional[Path] = None)
         cursor.execute("DELETE FROM authorized_vehicles WHERE plate_number = ?", (exact_plate,))
         conn.commit()
 
+    dump_authorized_registry_to_disk(db_path=db_path)
     return True
 
 

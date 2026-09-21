@@ -83,6 +83,8 @@ export default function LiveVideoFeed({
   customFencePointsRef.current = customFencePoints;
   const isDrawingFenceRef = useRef(isDrawingFence);
   isDrawingFenceRef.current = isDrawingFence;
+  const isWebcamMirrorRef = useRef(isWebcamMirror);
+  isWebcamMirrorRef.current = isWebcamMirror;
 
   // Offline Video File Upload (Item 26)
   const fileInputRef = useRef(null);
@@ -145,18 +147,28 @@ export default function LiveVideoFeed({
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
 
+    const isMirrored = Boolean(isWebcamMirrorRef.current);
+
     // 1. Draw Virtual Fence Polygon (Custom drawn polygon or default side perimeter corridor)
     if (zoneActive) {
       const customPts = customFencePointsRef.current;
       const isCustom = customPts && customPts.length >= 3;
       const poly = isCustom
-        ? customPts.map(([nx, ny]) => [nx * w, ny * h])
-        : [
-            [0.62 * w, 0.12 * h],
-            [0.96 * w, 0.12 * h],
-            [0.96 * w, 0.88 * h],
-            [0.62 * w, 0.88 * h],
-          ];
+        ? customPts.map(([nx, ny]) => [isMirrored ? (1.0 - nx) * w : nx * w, ny * h])
+        : (isMirrored
+            ? [
+                [(1.0 - 0.96) * w, 0.12 * h],
+                [(1.0 - 0.62) * w, 0.12 * h],
+                [(1.0 - 0.62) * w, 0.88 * h],
+                [(1.0 - 0.96) * w, 0.88 * h],
+              ]
+            : [
+                [0.62 * w, 0.12 * h],
+                [0.96 * w, 0.12 * h],
+                [0.96 * w, 0.88 * h],
+                [0.62 * w, 0.88 * h],
+              ]
+          );
 
       ctx.save();
       ctx.beginPath();
@@ -207,24 +219,27 @@ export default function LiveVideoFeed({
       const pts = customFencePointsRef.current || [];
       ctx.save();
       if (pts.length > 0) {
+        const getPtX = (nx) => (isMirrored ? (1.0 - nx) * w : nx * w);
         ctx.beginPath();
         ctx.setLineDash([6, 4]);
         ctx.strokeStyle = '#f59e0b';
         ctx.lineWidth = 2;
-        ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
+        ctx.moveTo(getPtX(pts[0][0]), pts[0][1] * h);
         for (let i = 1; i < pts.length; i++) {
-          ctx.lineTo(pts[i][0] * w, pts[i][1] * h);
+          ctx.lineTo(getPtX(pts[i][0]), pts[i][1] * h);
         }
         ctx.stroke();
 
         pts.forEach(([nx, ny], idx) => {
+          const px = getPtX(nx);
+          const py = ny * h;
           ctx.beginPath();
-          ctx.arc(nx * w, ny * h, 6, 0, 2 * Math.PI);
+          ctx.arc(px, py, 6, 0, 2 * Math.PI);
           ctx.fillStyle = '#f59e0b';
           ctx.fill();
           ctx.font = 'bold 10px monospace';
           ctx.fillStyle = '#000000';
-          ctx.fillText(String(idx + 1), nx * w - 3, ny * h + 3);
+          ctx.fillText(String(idx + 1), px - 3, py + 3);
         });
       }
 
@@ -246,7 +261,7 @@ export default function LiveVideoFeed({
     detections.forEach((det) => {
       if (!det.norm_bbox) return;
       const [nx1, ny1, nx2, ny2] = det.norm_bbox;
-      const x1 = nx1 * w;
+      const x1 = isMirrored ? (1.0 - nx2) * w : nx1 * w;
       const y1 = ny1 * h;
       const bw = (nx2 - nx1) * w;
       const bh = (ny2 - ny1) * h;
@@ -332,7 +347,7 @@ export default function LiveVideoFeed({
       if (isVehicle) {
         let px1, py1, pw, ph;
         if (det.plate_bbox && det.plate_bbox.length === 4) {
-          px1 = det.plate_bbox[0];
+          px1 = isMirrored ? (w - det.plate_bbox[2]) : det.plate_bbox[0];
           py1 = det.plate_bbox[1];
           pw = Math.max(20, det.plate_bbox[2] - det.plate_bbox[0]);
           ph = Math.max(12, det.plate_bbox[3] - det.plate_bbox[1]);
@@ -1587,7 +1602,7 @@ export default function LiveVideoFeed({
                 objectFit: 'cover',
                 pointerEvents: isDrawingFence ? 'auto' : 'none',
                 cursor: isDrawingFence ? 'crosshair' : 'default',
-                transform: isWebcamMirror ? 'scaleX(-1)' : 'none',
+                transform: 'none',
               }}
             />
             {webcamError && (
